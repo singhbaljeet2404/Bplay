@@ -1,0 +1,50 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.bplay.sender'
+    compileSdk rootProject.ext.bplayCompileSdk
+
+    defaultConfig {
+        applicationId "com.bplay.sender"
+        minSdk rootProject.ext.bplayMinSdk
+        targetSdk rootProject.ext.bplayTargetSdk
+        versionCode rootProject.ext.bplayVersionCode
+        versionName rootProject.ext.bplayVersionName
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('../keystore/bplay-release.jks')
+            storePassword 'bplaymirror'
+            keyAlias 'bplay'
+            keyPassword 'bplaymirror'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            applicationIdSuffix '.debug'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation project(':protocol')
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.core:core:1.12.0'
+}

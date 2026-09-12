@@ -1,0 +1,27 @@
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+    id 'com.android.library' version '8.7.3' apply false
+}
+
+// Version is shared by both APKs so a release always ships a matched pair.
+ext {
+    bplayVersionCode = 1
+    bplayVersionName = '1.0.0'
+    bplayMinSdk = 22       // Fire OS 5 (Fire TV Stick 2nd gen) and up
+    bplayTargetSdk = 34
+    bplayCompileSdk = 34
+    kotlinStdlibVersion = '1.8.22'
+}
+
+// AndroidX pulls in both kotlin-stdlib 1.8.x and the old split kotlin-stdlib-jdk7/jdk8 artifacts.
+// Those were folded into kotlin-stdlib as of 1.8, so the two overlap and dexing fails on duplicate
+// classes. Pinning the split artifacts to the same version makes Gradle collapse them.
+subprojects {
+    configurations.configureEach {
+        resolutionStrategy {
+            force "org.jetbrains.kotlin:kotlin-stdlib:$kotlinStdlibVersion"
+            force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinStdlibVersion"
+            force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinStdlibVersion"
+        }
+    }
+}

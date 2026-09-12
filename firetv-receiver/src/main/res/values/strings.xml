@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BPlay Mirror</string>
+
+    <string name="status_starting">Starting up…</string>
+    <string name="status_ready">Ready — waiting for a device</string>
+    <string name="status_mirroring">Mirroring from %1$s</string>
+    <string name="status_stopped">Stopped</string>
+    <string name="status_error">Can\'t start: %1$s</string>
+
+    <string name="label_address">On your phone or computer, open</string>
+    <string name="label_pin">PIN</string>
+    <string name="label_name">This TV is called</string>
+    <string name="address_unknown">No network — connect this Fire TV to Wi‑Fi</string>
+    <string name="pin_off">off</string>
+
+    <string name="hint_with_pin">Same Wi‑Fi network, any browser. Accept the security warning once, then enter the PIN.\nAndroid and iPhone can also use the BPlay sender app for lower latency.</string>
+    <string name="hint_without_pin">Same Wi‑Fi network, any browser. Accept the security warning once.\nAnyone on this network can now mirror without a PIN.</string>
+    <string name="scan_hint">Scan to open on a phone</string>
+
+    <string name="button_rename">Rename TV</string>
+    <string name="button_new_pin">New PIN</string>
+    <string name="button_pin_disable">Turn PIN off</string>
+    <string name="button_pin_enable">Turn PIN on</string>
+    <string name="button_quality">Quality: %1$dp · %2$d Mbps</string>
+    <string name="button_help">Help</string>
+
+    <string name="dialog_rename_title">Rename this TV</string>
+    <string name="dialog_rename_message">This is the name your phone and laptop will show when they look for a screen to mirror to.</string>
+
+    <string name="help_title">How to connect</string>
+    <string name="help_body">WINDOWS, MAC, LINUX, CHROMEBOOK\nOpen the address above in Chrome, Edge, Firefox or Safari. The browser will warn that the connection is not private — that is expected, because this TV signs its own certificate. Choose Advanced, then Proceed. Pick a screen or window and press Start.\n\nANDROID PHONE OR TABLET\nInstall the BPlay Sender app, pick this TV from the list, enter the PIN.\nOr just use the browser — Chrome on Android works too.\n\nIPHONE AND IPAD\nSafari cannot capture the screen, so use the BPlay Sender app for iOS (build instructions are in the project README). Photos and videos can be cast from Safari without it.\n\nBLUETOOTH\nBluetooth is used to hand your phone this TV\'s address and PIN automatically. Video always travels over Wi‑Fi — Bluetooth is far too slow to carry a screen.\n\nNOT WORKING?\nBoth devices must be on the same Wi‑Fi network, and the network must not have client isolation (\"AP isolation\") turned on — guest networks usually do.\n\nCertificate fingerprint: %1$s</string>
+</resources>

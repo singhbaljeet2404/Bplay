@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.bplay.mirror'
+    compileSdk rootProject.ext.bplayCompileSdk
+
+    defaultConfig {
+        applicationId "com.bplay.mirror"
+        minSdk rootProject.ext.bplayMinSdk
+        targetSdk rootProject.ext.bplayTargetSdk
+        versionCode rootProject.ext.bplayVersionCode
+        versionName rootProject.ext.bplayVersionName
+        resValue "string", "app_version", rootProject.ext.bplayVersionName
+    }
+
+    signingConfigs {
+        release {
+            // Deliberately a checked-in key with published credentials. This app is sideloaded,
+            // never served from an app store, so the signature's only job is to let one install
+            // upgrade the next. See docs/SIGNING.md before you assume this is a mistake.
+            storeFile file('../keystore/bplay-release.jks')
+            storePassword 'bplaymirror'
+            keyAlias 'bplay'
+            keyPassword 'bplaymirror'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false          // MediaCodec/NanoHTTPD reflection paths; not worth the risk
+            signingConfig signingConfigs.release
+        }
+        debug {
+            applicationIdSuffix '.debug'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    packagingOptions {
+        resources {
+            excludes += ['META-INF/*.kotlin_module', 'META-INF/DEPENDENCIES']
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation project(':protocol')
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.core:core:1.12.0'
+    // Embedded HTTPS + WebSocket server. Small, no servlet container, works on API 22.
+    implementation 'org.nanohttpd:nanohttpd-websocket:2.3.1'
+    // QR code the user points a phone camera at to open the sender page.
+    implementation 'com.google.zxing:core:3.5.3'
+}

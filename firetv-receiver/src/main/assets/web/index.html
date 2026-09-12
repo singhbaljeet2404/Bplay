@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>BPlay Mirror</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap">
+
+  <header class="head">
+    <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M1 18v3h3c0-1.66-1.34-3-3-3zM1 14v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zM1 10v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zM21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+    </svg>
+    <div>
+      <h1>BPlay Mirror</h1>
+      <p class="sub">Mirroring to <strong id="tv-name">your Fire TV</strong></p>
+    </div>
+  </header>
+
+  <section id="panel-unsupported" class="card danger" hidden>
+    <h2>This browser can't capture a screen</h2>
+    <p id="unsupported-reason"></p>
+    <p class="muted">Chrome, Edge, Firefox and Safari on a desktop or laptop all work.
+      On iPhone and iPad no browser can share the screen at all &mdash; that is an iOS
+      restriction, not a BPlay one &mdash; so use the BPlay Sender app instead.</p>
+  </section>
+
+  <section id="panel-setup" class="card">
+    <div class="field">
+      <label for="pin">PIN shown on the TV</label>
+      <input id="pin" inputmode="numeric" autocomplete="off" maxlength="4"
+             placeholder="0000" aria-describedby="pin-help">
+      <p id="pin-help" class="muted">Leave empty if the TV says the PIN is off.</p>
+    </div>
+
+    <div class="field">
+      <label for="quality">Quality</label>
+      <select id="quality">
+        <option value="720">720p &middot; smoothest over Wi-Fi</option>
+        <option value="1080" selected>1080p &middot; sharper text</option>
+        <option value="480">480p &middot; for weak connections</option>
+      </select>
+    </div>
+
+    <label class="check">
+      <input type="checkbox" id="want-audio" checked>
+      <span>Send audio too <em id="audio-note"></em></span>
+    </label>
+
+    <button id="start" class="primary">Start mirroring</button>
+    <p id="setup-error" class="error" hidden></p>
+  </section>
+
+  <section id="panel-live" class="card" hidden>
+    <div class="live-row">
+      <span class="dot" aria-hidden="true"></span>
+      <div>
+        <h2 id="live-title">Mirroring</h2>
+        <p class="muted" id="live-detail">Starting up&hellip;</p>
+      </div>
+    </div>
+    <dl class="stats">
+      <div><dt>Resolution</dt><dd id="stat-size">&ndash;</dd></div>
+      <div><dt>Frame rate</dt><dd id="stat-fps">&ndash;</dd></div>
+      <div><dt>Bitrate</dt><dd id="stat-rate">&ndash;</dd></div>
+      <div><dt>Dropped</dt><dd id="stat-drop">0</dd></div>
+    </dl>
+    <button id="stop" class="danger-btn">Stop mirroring</button>
+  </section>
+
+  <details class="card faq">
+    <summary>The browser warned me the connection isn't private</summary>
+    <p>That is expected, and it is safe here. Your Fire TV signs its own certificate, because no
+      certificate authority on the internet will vouch for a private address like
+      <code>192.168.x.x</code>. Choose <strong>Advanced</strong> and then
+      <strong>Proceed</strong>. Your browser remembers the choice.</p>
+    <p>The encryption itself is real &mdash; the warning is about who vouches for the key, not
+      about whether the connection is encrypted. The TV shows the certificate's fingerprint under
+      Help if you want to check it matches.</p>
+  </details>
+
+  <details class="card faq">
+    <summary>Nothing happens, or the page won't load at all</summary>
+    <ul>
+      <li>This device and the Fire TV must be on the <strong>same Wi-Fi network</strong>. A phone
+        on mobile data cannot reach it.</li>
+      <li>Guest networks usually block devices from talking to each other
+        (&ldquo;AP isolation&rdquo;). Use the main network.</li>
+      <li>Some 5&nbsp;GHz and 2.4&nbsp;GHz bands are separate networks on the same router. Try
+        joining the one the Fire TV is on.</li>
+      <li>If the TV's address changed, reopen the address currently shown on the TV screen.</li>
+    </ul>
+  </details>
+
+  <footer class="foot">
+    <span id="version">BPlay</span> &middot; free and open source &middot; no account, no cloud,
+    nothing leaves your network
+  </footer>
+</main>
+<script src="wire.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

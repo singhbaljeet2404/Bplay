@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BPlay Sender</string>
+
+    <string name="heading">Mirror this screen to a Fire TV</string>
+    <string name="section_devices">Fire TVs found</string>
+    <string name="section_settings">Settings</string>
+
+    <string name="status_searching">Searching your Wi‑Fi network…</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_mirroring">Mirroring to %1$s</string>
+    <string name="status_stopped">Stopped</string>
+    <string name="status_permission_denied">Screen capture was declined, so there is nothing to send.</string>
+
+    <string name="manual_hint">Or type the address shown on the TV</string>
+    <string name="pin_hint">PIN from the TV</string>
+    <string name="label_quality">Quality</string>
+    <string name="audio">Send audio as well</string>
+    <string name="audio_unsupported">Send audio (needs Android 10 or newer)</string>
+
+    <string name="connect">Start mirroring</string>
+    <string name="stop">Stop</string>
+    <string name="refresh">Search again</string>
+    <string name="bluetooth">Also look over Bluetooth</string>
+    <string name="bluetooth_unavailable">Bluetooth discovery is unavailable. The TV can still be reached by typing its address.</string>
+    <string name="pick_a_tv">Choose a TV, or type its address.</string>
+
+    <string name="footer">Video always travels over Wi‑Fi. Bluetooth is only used to find the TV\'s address and PIN — it is far too slow to carry a screen.</string>
+
+    <plurals name="status_found">
+        <item quantity="one">Found %1$d Fire TV</item>
+        <item quantity="other">Found %1$d Fire TVs</item>
+    </plurals>
+
+    <string-array name="quality_labels">
+        <item>720p · smoothest</item>
+        <item>1080p · sharper text</item>
+        <item>480p · weak connections</item>
+    </string-array>
+
+    <integer-array name="quality_values">
+        <item>720</item>
+        <item>1080</item>
+        <item>480</item>
+    </integer-array>
+</resources>
