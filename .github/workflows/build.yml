@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Tag to publish a release as, e.g. v1.0.0. Leave empty to only build.'
+        required: false
+        default: ''
 
 # Needed so a tagged build can publish its APKs as a release.
 permissions:
@@ -79,15 +84,24 @@ jobs:
           path: dist/*.apk
           if-no-files-found: error
 
+      # Publishes either from a pushed tag, or on demand with the tag named as an input --
+      # the latter lets a release be cut without push access to tags.
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_INPUT: ${{ inputs.release }}
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          # Recreate rather than fail if the tag is pushed again after a fix.
-          gh release delete "$VERSION" --yes --cleanup-tag=false 2>/dev/null || true
+          if [ -n "$RELEASE_INPUT" ]; then
+            VERSION="$RELEASE_INPUT"
+          else
+            VERSION="$GITHUB_REF_NAME"
+          fi
+          echo "Publishing $VERSION from $GITHUB_SHA"
+          # Recreate rather than fail when a release is re-cut after a fix.
+          gh release delete "$VERSION" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
             --title "BPlay Mirror $VERSION" \
             --notes-file .github/release-notes.md \
             dist/bplay-firetv.apk \
