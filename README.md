@@ -135,9 +135,22 @@ You need JDK 17 and an Android SDK with API 34. The APKs land in
 `node tools/wire-check.js` verifies the browser sender still encodes bytes the receiver
 understands.
 
-Releases are built by GitHub Actions from a tag — see
-[.github/workflows/build.yml](.github/workflows/build.yml). Signing is
-[deliberately public](docs/SIGNING.md).
+Signing is [deliberately public](docs/SIGNING.md) — see that page for why a release key is
+committed here on purpose.
+
+### Cutting a release
+
+The install link at the top of this page points at `releases/latest`, so it starts working as soon
+as one release exists and keeps working for every release after. Two ways to publish one, both of
+which build the APKs from scratch in CI and attach them:
+
+- **From the Actions tab:** *Build → Run workflow*, set **release** to `v1.0.0`, Run. The tag is
+  created from the commit that gets built.
+- **From a terminal:** `git tag v1.0.0 && git push origin v1.0.0`.
+
+Either way the same workflow runs the tests, checks the browser and receiver still agree on the
+wire format, verifies the APK declares a Fire TV launcher and requires no mandatory hardware, and
+only then publishes.
 
 ---
 
