@@ -123,7 +123,10 @@ class MirrorSender {
 
     await this.connect(pin, source);
 
-    const size = scaleToFit(source.width, source.height, this.tvMaxHeight || maxHeight);
+    // Both ceilings apply: the TV's limit and whatever the user picked. Taking the TV's alone
+    // would silently ignore someone who chose 720p to get a smoother picture.
+    const ceiling = Math.min(maxHeight, this.tvMaxHeight || maxHeight);
+    const size = scaleToFit(source.width, source.height, ceiling);
     this.width = size.width;
     this.height = size.height;
 
