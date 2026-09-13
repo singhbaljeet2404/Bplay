@@ -4,9 +4,15 @@ plugins {
 }
 
 // Version is shared by both APKs so a release always ships a matched pair.
+def bplayVersion = file('VERSION').text.trim()
+def bplayVersionParts = bplayVersion.tokenize('.')
+
 ext {
-    bplayVersionCode = 1
-    bplayVersionName = '1.0.0'
+    // Derived so the code can never drift from the name; 1.2.3 -> 10203.
+    bplayVersionCode = bplayVersionParts[0].toInteger() * 10000 +
+            bplayVersionParts[1].toInteger() * 100 +
+            bplayVersionParts[2].toInteger()
+    bplayVersionName = bplayVersion
     bplayMinSdk = 22       // Fire OS 5 (Fire TV Stick 2nd gen) and up
     bplayTargetSdk = 34
     bplayCompileSdk = 34

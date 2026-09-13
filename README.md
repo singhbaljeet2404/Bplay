@@ -144,9 +144,14 @@ The install link at the top of this page points at `releases/latest`, so it star
 as one release exists and keeps working for every release after. Two ways to publish one, both of
 which build the APKs from scratch in CI and attach them:
 
-- **From the Actions tab:** *Build → Run workflow*, set **release** to `v1.0.0`, Run. The tag is
-  created from the commit that gets built.
+- **Bump `VERSION` and push.** CI publishes whatever version that file names, if no release
+  exists for it yet, creating the tag itself. Re-running on the same version does nothing, so
+  this is safe to leave in place.
+- **From the Actions tab:** *Build → Run workflow*, set **release** to `v1.0.0`, Run.
 - **From a terminal:** `git tag v1.0.0 && git push origin v1.0.0`.
+
+`VERSION` is the single source of truth: both APKs take their version name from it, and the
+version code is derived from it (1.2.3 becomes 10203), so the two cannot drift.
 
 Either way the same workflow runs the tests, checks the browser and receiver still agree on the
 wire format, verifies the APK declares a Fire TV launcher and requires no mandatory hardware, and

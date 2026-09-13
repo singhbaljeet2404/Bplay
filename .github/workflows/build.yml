@@ -89,20 +89,45 @@ jobs:
           path: dist/*.apk
           if-no-files-found: error
 
-      # Publishes either from a pushed tag, or on demand with the tag named as an input --
-      # the latter lets a release be cut without push access to tags.
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
+      # Three ways a release gets published, all ending in the same place:
+      #   - a pushed tag v*
+      #   - a manual run with the tag named as an input
+      #   - a push whose VERSION file names a release that does not exist yet
+      # The last one exists because creating tags is not available to everyone who needs to cut
+      # a release; the runner's own token has contents:write, so CI creates the tag itself.
+      - name: Decide whether to publish
+        id: decide
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_INPUT: ${{ inputs.release }}
         run: |
-          if [ -n "$RELEASE_INPUT" ]; then
+          set -euo pipefail
+          if [ -n "${RELEASE_INPUT:-}" ]; then
             VERSION="$RELEASE_INPUT"
-          else
+            REASON="requested by a manual run"
+          elif case "$GITHUB_REF" in refs/tags/v*) true;; *) false;; esac; then
             VERSION="$GITHUB_REF_NAME"
+            REASON="tag pushed"
+          else
+            VERSION="v$(tr -d ' \r\n' < VERSION)"
+            if gh release view "$VERSION" >/dev/null 2>&1; then
+              echo "$VERSION is already published; nothing to do."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            REASON="VERSION names $VERSION, which has no release yet"
           fi
-          echo "Publishing $VERSION from $GITHUB_SHA"
+          echo "Publishing $VERSION ($REASON)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        if: steps.decide.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.decide.outputs.version }}
+        run: |
+          set -euo pipefail
           # Recreate rather than fail when a release is re-cut after a fix.
           gh release delete "$VERSION" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$VERSION" \
@@ -111,3 +136,5 @@ jobs:
             --notes-file .github/release-notes.md \
             dist/bplay-firetv.apk \
             dist/bplay-sender.apk
+          echo "Install URL is now live:"
+          echo "  https://github.com/$GITHUB_REPOSITORY/releases/latest/download/bplay-firetv.apk"
