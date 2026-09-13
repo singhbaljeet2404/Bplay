@@ -70,30 +70,20 @@ public final class MainActivity extends AppCompatActivity implements MirrorServi
     @Override
     protected void onResume() {
         super.onResume();
-        refreshFromService();
-        MirrorService service = MirrorService.current();
-        if (service != null) {
-            service.addListener(this);
-        }
+        // Subscribing before the service exists is the normal case on a cold start, and the
+        // registry is built for it: this call renders straight away from stored settings and is
+        // called again the moment the service comes up.
+        MirrorService.addListener(this, this);
     }
 
     @Override
     protected void onPause() {
-        MirrorService service = MirrorService.current();
-        if (service != null) {
-            service.removeListener(this);
-        }
+        MirrorService.removeListener(this);
         super.onPause();
     }
 
     private void refreshFromService() {
-        MirrorService service = MirrorService.current();
-        if (service == null) {
-            // The service is still starting; its first callback will fill the screen in.
-            statusView.setText(R.string.status_starting);
-            return;
-        }
-        onStatusChanged(service.status());
+        render(MirrorService.snapshot(this));
     }
 
     @Override
@@ -102,7 +92,7 @@ public final class MainActivity extends AppCompatActivity implements MirrorServi
     }
 
     private void render(MirrorService.Status status) {
-        nameView.setText(status.deviceName);
+        nameView.setText(status.deviceName != null ? status.deviceName : Prefs.deviceName(this));
 
         switch (status.state) {
             case RUNNING:
@@ -125,7 +115,13 @@ public final class MainActivity extends AppCompatActivity implements MirrorServi
         }
 
         String url = status.senderUrl();
-        addressView.setText(url != null ? url : getString(R.string.address_unknown));
+        if (url != null) {
+            addressView.setText(url);
+        } else if (status.state == MirrorService.State.STARTING) {
+            addressView.setText(R.string.address_starting);
+        } else {
+            addressView.setText(R.string.address_unknown);
+        }
 
         boolean pinOn = Prefs.pinEnabled(this);
         pinView.setText(pinOn ? status.pin : getString(R.string.pin_off));

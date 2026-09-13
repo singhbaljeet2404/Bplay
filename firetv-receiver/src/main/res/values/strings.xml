@@ -12,6 +12,7 @@
     <string name="label_pin">PIN</string>
     <string name="label_name">This TV is called</string>
     <string name="address_unknown">No network — connect this Fire TV to Wi‑Fi</string>
+    <string name="address_starting">Getting ready…</string>
     <string name="pin_off">off</string>
 
     <string name="hint_with_pin">Same Wi‑Fi network, any browser. Accept the security warning once, then enter the PIN.\nAndroid and iPhone can also use the BPlay sender app for lower latency.</string>

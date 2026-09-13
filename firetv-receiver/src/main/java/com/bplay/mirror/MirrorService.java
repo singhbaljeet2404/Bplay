@@ -74,8 +74,15 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
 
     private static volatile MirrorService instance;
 
+    /**
+     * Static because an activity always subscribes before this service exists. Starting a service
+     * only queues its creation, and the activity's onResume runs first on the same main-looper
+     * pass -- so a listener list owned by the instance could never be reached in time, and the UI
+     * would wait forever for a callback nobody was there to send.
+     */
+    private static final List<StatusListener> LISTENERS = new CopyOnWriteArrayList<>();
+
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final List<StatusListener> listeners = new CopyOnWriteArrayList<>();
     private final Object sessionLock = new Object();
 
     private CertificateStore certificates;
@@ -109,6 +116,8 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
         certificates = new CertificateStore(this);
         discovery = new Discovery(this);
         beacon = new BleBeacon(this);
+        // Whoever subscribed while this did not yet exist is still waiting.
+        main.post(this::notifyListeners);
     }
 
     @Override
@@ -131,6 +140,7 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
     }
 
     private void bringUpServers() {
+        long startedAt = android.os.SystemClock.elapsedRealtime();
         try {
             address = NetworkUtils.primaryAddress();
             if (address == null) {
@@ -156,7 +166,9 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
 
             state = State.RUNNING;
             error = null;
-            Log.i(TAG, "Ready at " + address + " (cert " + certificates.fingerprint() + ")");
+            Log.i(TAG, "Ready at " + address + " after "
+                    + (android.os.SystemClock.elapsedRealtime() - startedAt) + " ms"
+                    + " (cert " + certificates.fingerprint() + ")");
         } catch (Exception e) {
             Log.e(TAG, "Startup failed", e);
             error = e.getMessage() != null ? e.getMessage() : e.toString();
@@ -356,13 +368,28 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
         return certificates != null ? certificates.fingerprint() : "";
     }
 
-    public void addListener(StatusListener listener) {
-        listeners.add(listener);
-        listener.onStatusChanged(status());
+    /** Safe to call before the service is running; the listener is told again once it is. */
+    public static void addListener(Context context, StatusListener listener) {
+        LISTENERS.add(listener);
+        listener.onStatusChanged(snapshot(context));
     }
 
-    public void removeListener(StatusListener listener) {
-        listeners.remove(listener);
+    public static void removeListener(StatusListener listener) {
+        LISTENERS.remove(listener);
+    }
+
+    /**
+     * The running service's status, or a placeholder for the seconds before it exists. The name
+     * and PIN come from storage either way, so the screen has something true to show immediately
+     * rather than sitting blank.
+     */
+    public static Status snapshot(Context context) {
+        MirrorService service = instance;
+        if (service != null) {
+            return service.status();
+        }
+        return new Status(State.STARTING, null, Prefs.requiredPin(context),
+                Prefs.deviceName(context), null, null);
     }
 
     /** Re-advertises after the user renames the TV or changes the PIN. */
@@ -382,7 +409,7 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
 
     private void notifyListeners() {
         Status snapshot = status();
-        for (StatusListener listener : listeners) {
+        for (StatusListener listener : LISTENERS) {
             try {
                 listener.onStatusChanged(snapshot);
             } catch (Exception e) {
