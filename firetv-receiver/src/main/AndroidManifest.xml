@@ -67,6 +67,16 @@
             android:screenOrientation="landscape"
             android:theme="@style/Theme.BPlay.Fullscreen" />
 
+        <activity
+            android:name=".MediaPlaybackActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.BPlay.Fullscreen" />
+
         <service
             android:name=".MirrorService"
             android:exported="false"

@@ -51,7 +51,7 @@ updates are one click.
 
 | Your device | What to do | Install anything? |
 | --- | --- | --- |
-| **Windows / macOS / Linux / Chromebook** | Open the `https://` address shown on the TV in Chrome, Edge, Firefox or Safari. Pick a screen, a camera, or photos and video. Press Start. | **No** |
+| **Windows / macOS / Linux / Chromebook** | Open the `https://` address shown on the TV in Chrome, Edge, Firefox or Safari. Mirror a screen, share a camera, or play photos and video on the TV at full quality. | **No** |
 | **Android phone or tablet** | Install [`bplay-sender.apk`](https://github.com/singhbaljeet2404/Bplay/releases/latest/download/bplay-sender.apk), or just use Chrome and the same address. | Optional |
 | **iPhone / iPad** | Open the same address for **camera, photos and video**. For full screen mirroring, build the sender app from [`ios-sender/`](ios-sender/README.md). | No / Yes |
 
@@ -111,7 +111,9 @@ Safari, or scan the QR code, and you get:
 
 - **Camera** — live, either lens
 - **Photos** — pick several, step through them with Previous/Next
-- **Video** — plays on the TV with sound, controlled from your phone
+- **Video** — the TV plays the file itself at full quality, with play, pause and seek from your
+  phone. Nothing is uploaded and nothing is re-encoded: the TV reads the parts of the file it
+  needs, so a large video starts as quickly as a small one.
 
 For full screen mirroring, the complete iOS source is in [`ios-sender/`](ios-sender/README.md) —
 about ten minutes in Xcode with a free Apple ID, at no cost.

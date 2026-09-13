@@ -88,6 +88,7 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
     private CertificateStore certificates;
     private TcpStreamServer tcpServer;
     private WebServer webServer;
+    private LocalMediaServer mediaServer;
     private Discovery discovery;
     private BleBeacon beacon;
 
@@ -238,6 +239,14 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
         } catch (Exception ignored) {
             // Teardown is best effort.
         }
+        try {
+            if (mediaServer != null) {
+                mediaServer.stop();
+                mediaServer = null;
+            }
+        } catch (Exception ignored) {
+            // Teardown is best effort.
+        }
     }
 
     @Override
@@ -297,6 +306,72 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
         return session;
     }
 
+    // ---- native file playback -------------------------------------------
+
+    @Override
+    public void onSessionMediaOffered(MirrorSession session) {
+        main.post(() -> {
+            MirrorSession active = activeSession;
+            if (active != session) {
+                return;
+            }
+            try {
+                // One server per session: it reads through that session's relay, and stops with it.
+                if (mediaServer != null) {
+                    mediaServer.stop();
+                }
+                mediaServer = new LocalMediaServer(session.relay());
+            } catch (Exception e) {
+                Log.w(TAG, "Could not start the local media server", e);
+                mediaServer = null;
+                return;
+            }
+            startActivity(new Intent(this, MediaPlaybackActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            goForeground(statusText());
+            notifyListeners();
+        });
+    }
+
+    @Override
+    public void onSessionMediaControl(MirrorSession session, String action, int positionMs) {
+        main.post(() -> {
+            MediaPlaybackActivity player = MediaPlaybackActivity.current();
+            if (player != null) {
+                player.applyControl(action, positionMs);
+            }
+        });
+    }
+
+    /** The loopback URL the television's own player reads from, or null when nothing is offered. */
+    public String mediaUrl() {
+        LocalMediaServer server = mediaServer;
+        MirrorSession session = activeSession;
+        if (server == null || session == null) {
+            return null;
+        }
+        MediaRelay.Offer offer = session.relay().offer();
+        return offer == null ? null : server.urlFor(offer.id);
+    }
+
+    /** Tells the sender where playback has got to, so its scrub bar means something. */
+    public void reportMediaState(int positionMs, int durationMs, boolean playing) {
+        MirrorSession session = activeSession;
+        if (session == null) {
+            return;
+        }
+        session.sendBack(BplayProtocol.TYPE_MEDIA_STATE, 0, 0, new com.bplay.protocol.Params()
+                .put("positionMs", positionMs)
+                .put("durationMs", durationMs)
+                .put("state", playing ? "playing" : "paused")
+                .encode());
+    }
+
+    public MediaRelay.Offer mediaOffer() {
+        MirrorSession session = activeSession;
+        return session == null ? null : session.relay().offer();
+    }
+
     // ---- MirrorSession.Callback -----------------------------------------
 
     @Override
@@ -330,6 +405,14 @@ public final class MirrorService extends Service implements SessionHost, MirrorS
             MirrorActivity activity = MirrorActivity.current();
             if (activity != null) {
                 activity.onSessionEnded(reason);
+            }
+            MediaPlaybackActivity player = MediaPlaybackActivity.current();
+            if (player != null) {
+                player.onSessionEnded();
+            }
+            if (mediaServer != null) {
+                mediaServer.stop();
+                mediaServer = null;
             }
             goForeground(statusText());
             notifyListeners();

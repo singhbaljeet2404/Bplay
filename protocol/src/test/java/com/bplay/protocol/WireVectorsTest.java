@@ -124,6 +124,44 @@ public class WireVectorsTest {
     }
 
     @Test
+    public void readsAFileOfferFromTheBrowser() throws IOException {
+        Packet packet = Packet.parse(vector("media_offer"));
+        assertEquals(BplayProtocol.TYPE_MEDIA_OFFER, packet.type);
+        Params offer = Params.decode(packet.payload);
+        assertEquals("Holiday.mp4", offer.get("name", null));
+        assertEquals("video/mp4", offer.get("mime", null));
+        assertEquals("video", offer.get("kind", null));
+        // 3 GB: the size of a real film, and well past what an int could hold.
+        assertEquals(3221225472L, Long.parseLong(offer.get("size", "0")));
+    }
+
+    @Test
+    public void readsAByteRangeFromNearTheEndOfALargeFile() throws IOException {
+        Packet packet = Packet.parse(vector("media_chunk"));
+        assertEquals(BplayProtocol.TYPE_MEDIA_DATA, packet.type);
+        assertTrue("must be marked as completing the request",
+                (packet.flags & BplayProtocol.FLAG_LAST_CHUNK) != 0);
+
+        MediaChunk chunk = MediaChunk.decode(packet.payload);
+        assertEquals(7, chunk.requestId);
+        // Seeking near the end of a 3 GB file is precisely where a 32-bit offset would wrap.
+        assertEquals(3221225000L, chunk.offset);
+        assertArrayEquals(new byte[]{(byte) 0xDE, (byte) 0xAD, (byte) 0xBE, (byte) 0xEF},
+                chunk.data);
+    }
+
+    @Test
+    public void mediaChunkRoundTripsThroughJava() {
+        byte[] data = new byte[4096];
+        new java.util.Random(3).nextBytes(data);
+        byte[] encoded = MediaChunk.encode(42, 9_000_000_000L, data, 0, data.length);
+        MediaChunk decoded = MediaChunk.decode(encoded);
+        assertEquals(42, decoded.requestId);
+        assertEquals(9_000_000_000L, decoded.offset);
+        assertArrayEquals(data, decoded.data);
+    }
+
+    @Test
     public void javaProducesTheSameBytesTheBrowserDoes() throws IOException {
         // The other direction: encoding the same fields here must reproduce the vector exactly.
         ByteArrayOutputStream out = new ByteArrayOutputStream();

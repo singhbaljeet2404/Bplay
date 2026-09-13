@@ -20,9 +20,17 @@
     PING: 5,
     BYE: 6,
     META: 7,
+    // Native file playback: the receiver decodes the file itself and pulls it a range at a time.
+    MEDIA_OFFER: 8,
+    MEDIA_REQUEST: 9,
+    MEDIA_DATA: 10,
+    MEDIA_END: 11,
+    MEDIA_CONTROL: 12,
+    MEDIA_STATE: 13,
   };
 
   const FLAG_KEYFRAME = 0x01;
+  const FLAG_LAST_CHUNK = 0x02;
 
   function escapeValue(text) {
     return String(text).replace(/([\\=])/g, '\\$1').replace(/\n/g, '\\n');
@@ -96,11 +104,41 @@
     return out;
   }
 
+  /** Reads a packet the receiver sent back. Mirrors Packet.parse on the Java side. */
+  function parsePacket(buffer) {
+    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    if (bytes.length < HEADER_SIZE) throw new Error('Runt packet');
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const length = view.getUint32(2);
+    if (length !== bytes.length - HEADER_SIZE) {
+      throw new Error('Declared length ' + length + ' != actual ' + (bytes.length - HEADER_SIZE));
+    }
+    return {
+      type: bytes[0],
+      flags: bytes[1],
+      timestampUs: view.getBigUint64(6),
+      payload: bytes.subarray(HEADER_SIZE),
+    };
+  }
+
+  /** The MEDIA_DATA payload: request id, absolute offset, then the bytes. */
+  function buildMediaChunk(requestId, offset, data) {
+    const out = new Uint8Array(12 + data.length);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, requestId);
+    view.setBigUint64(4, BigInt(offset));
+    out.set(data, 12);
+    return out;
+  }
+
   const api = {
     PROTOCOL_VERSION,
     HEADER_SIZE,
     TYPE,
     FLAG_KEYFRAME,
+    FLAG_LAST_CHUNK,
+    parsePacket,
+    buildMediaChunk,
     encodeParams,
     decodeParams,
     buildHandshake,

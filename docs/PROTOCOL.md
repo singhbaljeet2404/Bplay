@@ -81,8 +81,36 @@ offset  size  field
 | 5 | `PING` | Empty |
 | 6 | `BYE` | Empty |
 | 7 | `META` | `Params`: `width`, `height` after a rotation or resize |
+| 8 | `MEDIA_OFFER` | sender → receiver. `id`, `name`, `mime`, `size`, `kind` |
+| 9 | `MEDIA_REQUEST` | **receiver → sender.** `req`, `id`, `offset`, `length` |
+| 10 | `MEDIA_DATA` | sender → receiver. `MediaChunk`: request id, offset, bytes |
+| 11 | `MEDIA_END` | sender → receiver. `req`, optional `error` |
+| 12 | `MEDIA_CONTROL` | sender → receiver. `action` of play/pause/seek/stop, `positionMs` |
+| 13 | `MEDIA_STATE` | receiver → sender. `positionMs`, `durationMs`, `state` |
 
-Flags: bit 0 means keyframe.
+Flags: bit 0 means keyframe; bit 1 marks the last chunk of a `MEDIA_DATA` range.
+
+### Native file playback
+
+Mirroring a video means re-encoding it on the phone: quality is lost, the battery drains, and
+seeking is impossible because the receiver only ever sees a live stream. So a file can instead be
+handed over as itself.
+
+The receiver does not download it first. Uploading a three-gigabyte film would mean minutes of
+waiting and somewhere to put it, and a Fire TV Stick has very little room. Instead the receiver's
+own media player reads from a loopback HTTP server, and each read it performs becomes a
+`MEDIA_REQUEST` back over the connection the sender already has open. Playback starts at once, and
+a seek is just a read at a different offset.
+
+This is the only thing that made the receiver talk back mid-session, so it is also the only place
+`ReverseChannel` is used. Both transports are bidirectional; the receiver simply had nothing to
+say before.
+
+Support is advertised in the handshake response as `media=1`. A sender that does not see it falls
+back to re-encoding, so an older receiver still shows the video.
+
+Offsets are 64-bit throughout. A film is comfortably past the point where 32 bits would wrap, and
+the failure mode is not an error but a file with a hole in it.
 
 Timestamps are microseconds and pass 2³² after about 70 minutes, which is why the field is 64 bits
 and why the JavaScript implementation uses `BigInt` rather than `setUint32`.

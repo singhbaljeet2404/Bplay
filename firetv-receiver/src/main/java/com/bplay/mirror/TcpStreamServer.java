@@ -151,11 +151,25 @@ public final class TcpStreamServer {
                     .put(HandshakeCodec.KEY_NAME, host.deviceName())
                     .put(HandshakeCodec.KEY_MAX_WIDTH, host.maxHeight() * 16 / 9)
                     .put(HandshakeCodec.KEY_MAX_HEIGHT, host.maxHeight())
-                    .put(HandshakeCodec.KEY_MAX_BITRATE, host.maxBitrate()));
+                    .put(HandshakeCodec.KEY_MAX_BITRATE, host.maxBitrate())
+                    .put(BplayProtocol.KEY_SUPPORTS_MEDIA, true));
 
             socket.setSoTimeout(READ_TIMEOUT_MS);
             final MirrorSession active = session;
             session.setOnClose(() -> closeQuietly(socket));
+
+            // The stream was one-way until native file playback; range requests go back this way.
+            final Object writeLock = new Object();
+            session.setReverseChannel((type, flags, ptsUs, payload) -> {
+                try {
+                    synchronized (writeLock) {
+                        Packet.write(out, type, flags, ptsUs, payload, 0, payload.length);
+                        out.flush();
+                    }
+                } catch (IOException e) {
+                    Log.w(TAG, "Could not reach the sender", e);
+                }
+            });
 
             while (running.get() && !active.isClosed()) {
                 Packet packet = Packet.read(in);

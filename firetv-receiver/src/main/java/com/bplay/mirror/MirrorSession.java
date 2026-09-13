@@ -20,7 +20,19 @@ public final class MirrorSession implements VideoDecoder.Listener {
 
     private static final String TAG = "BPlaySession";
 
+    /**
+     * How the receiver talks back to the sender. Nothing needed this until native file playback:
+     * the stream was one-way, and the television had nothing to say after the handshake.
+     */
+    public interface ReverseChannel {
+        void sendBack(int type, int flags, long ptsUs, byte[] payload);
+    }
+
     public interface Callback {
+        void onSessionMediaOffered(MirrorSession session);
+
+        void onSessionMediaControl(MirrorSession session, String action, int positionMs);
+
         void onSessionVideoSize(MirrorSession session, int width, int height);
 
         void onSessionFirstFrame(MirrorSession session);
@@ -35,6 +47,8 @@ public final class MirrorSession implements VideoDecoder.Listener {
     private final AtomicBoolean closed = new AtomicBoolean();
     private final VideoDecoder video = new VideoDecoder(this);
     private final AudioPlayer audio = new AudioPlayer();
+    private final MediaRelay relay = new MediaRelay(this::requestRange);
+    private volatile ReverseChannel reverse;
 
     public final String deviceName;
     public final String platform;
@@ -71,6 +85,31 @@ public final class MirrorSession implements VideoDecoder.Listener {
         }
         video.start();
         Log.i(TAG, "Session opened: " + deviceName + " (" + platform + ") over " + transport);
+    }
+
+    public void setReverseChannel(ReverseChannel channel) {
+        this.reverse = channel;
+    }
+
+    public MediaRelay relay() {
+        return relay;
+    }
+
+    /** Sends a packet to the sender, if this transport has a way back. */
+    public void sendBack(int type, int flags, long ptsUs, byte[] payload) {
+        ReverseChannel channel = reverse;
+        if (channel != null) {
+            channel.sendBack(type, flags, ptsUs, payload);
+        }
+    }
+
+    private void requestRange(int requestId, String mediaId, long offset, int length) {
+        ReverseChannel channel = reverse;
+        if (channel == null) {
+            throw new IllegalStateException("This sender cannot supply file ranges");
+        }
+        channel.sendBack(BplayProtocol.TYPE_MEDIA_REQUEST, 0, 0,
+                MediaRelay.rangeRequest(requestId, mediaId, offset, length).encode());
     }
 
     /** Called when the connection closes, so the transport can clean its socket up. */
@@ -114,6 +153,23 @@ public final class MirrorSession implements VideoDecoder.Listener {
             case BplayProtocol.TYPE_META:
                 handleMeta(packet);
                 break;
+            case BplayProtocol.TYPE_MEDIA_OFFER:
+                relay.setOffer(Params.decode(packet.payload));
+                callback.onSessionMediaOffered(this);
+                break;
+            case BplayProtocol.TYPE_MEDIA_DATA:
+                relay.onData(packet.payload,
+                        (packet.flags & BplayProtocol.FLAG_LAST_CHUNK) != 0);
+                break;
+            case BplayProtocol.TYPE_MEDIA_END:
+                relay.onEnd(Params.decode(packet.payload));
+                break;
+            case BplayProtocol.TYPE_MEDIA_CONTROL: {
+                Params control = Params.decode(packet.payload);
+                callback.onSessionMediaControl(this, control.get("action", ""),
+                        control.getInt("positionMs", 0));
+                break;
+            }
             case BplayProtocol.TYPE_PING:
                 break; // presence is the whole message
             case BplayProtocol.TYPE_BYE:
@@ -160,6 +216,7 @@ public final class MirrorSession implements VideoDecoder.Listener {
         Log.i(TAG, "Session with " + deviceName + " ended: " + reason);
         video.stop();
         audio.stop();
+        relay.close();
         Runnable r = onClose;
         if (r != null) {
             try {

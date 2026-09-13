@@ -53,9 +53,14 @@ jobs:
       # does not exist and the page has to fall back to camera and files instead of dead-ending.
       - name: Browser test of the sender page
         run: |
-          npm install --no-save --no-fund --no-audit playwright-core
+          npm install --no-save --no-fund --no-audit playwright-core ws
           npx --yes playwright install chromium
           node tools/page-test.js
+
+      # Serves a real file to a stand-in receiver and compares every byte. An off-by-one in a
+      # range offset does not throw -- it hands the television a file with a hole in it.
+      - name: Byte-range file playback test
+        run: node tools/media-test.js
 
       - name: Unit tests
         run: ./gradlew :protocol:test --stacktrace

@@ -67,6 +67,19 @@ function buildVectors() {
     // An empty payload, as sent by keep-alives.
     packet_ping: hex(wire.buildPacket(wire.TYPE.PING, 0, 0, new Uint8Array(0))),
 
+    // A file offered for the receiver to play itself, rather than transcode.
+    media_offer: hex(wire.buildPacket(wire.TYPE.MEDIA_OFFER, 0, 0, wire.encodeParams({
+      id: '1',
+      name: 'Holiday.mp4',
+      mime: 'video/mp4',
+      size: '3221225472',
+      kind: 'video',
+    }))),
+
+    // One range of that file coming back, marked as completing the request.
+    media_chunk: hex(wire.buildPacket(wire.TYPE.MEDIA_DATA, wire.FLAG_LAST_CHUNK, 0,
+      wire.buildMediaChunk(7, 3221225000, new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF])))),
+
     // The audio descriptor a browser sends in place of codec-specific data it does not have.
     params_audio_config: hex(wire.encodeParams({
       codec: 'opus',

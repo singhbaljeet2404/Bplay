@@ -90,6 +90,14 @@
       <div><dt>Bitrate</dt><dd id="stat-rate">&ndash;</dd></div>
       <div><dt>Dropped</dt><dd id="stat-drop">0</dd></div>
     </dl>
+    <div id="transport" class="transport" hidden>
+      <button type="button" id="play-pause" class="ghost">Pause</button>
+      <div class="scrub">
+        <input type="range" id="seek" min="0" max="0" value="0" aria-label="Playback position">
+        <div class="times"><span id="elapsed">0:00</span><span id="duration">0:00</span></div>
+      </div>
+    </div>
+
     <div id="file-controls" class="file-controls" hidden>
       <button type="button" id="prev" class="ghost">&larr; Previous</button>
       <span id="file-position" class="muted"></span>

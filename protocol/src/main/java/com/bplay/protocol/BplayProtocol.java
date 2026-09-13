@@ -48,10 +48,33 @@ public final class BplayProtocol {
     /** UTF-8 {@link Params} blob: rotation or resolution changed mid-session. */
     public static final int TYPE_META = 7;
 
+    // ---- Native file playback -------------------------------------------
+    //
+    // Re-encoding a video through the mirroring pipeline costs quality, battery and any hope of
+    // seeking. These let the sender offer the file itself and have the television decode it, with
+    // the television pulling byte ranges on demand -- so playback starts at once instead of after
+    // an upload, and nothing has to fit in the stick's small storage.
+
+    /** Sender offers a file: {@code id}, {@code name}, {@code mime}, {@code size}, {@code kind}. */
+    public static final int TYPE_MEDIA_OFFER = 8;
+    /** Receiver asks for a byte range: {@code req}, {@code id}, {@code offset}, {@code length}. */
+    public static final int TYPE_MEDIA_REQUEST = 9;
+    /** Sender returns bytes. Payload is {@link MediaChunk}: reqId, offset, then the data. */
+    public static final int TYPE_MEDIA_DATA = 10;
+    /** Sender marks a range finished or failed: {@code req}, optional {@code error}. */
+    public static final int TYPE_MEDIA_END = 11;
+    /** Sender drives playback: {@code action} of play/pause/seek/stop, plus {@code positionMs}. */
+    public static final int TYPE_MEDIA_CONTROL = 12;
+    /** Receiver reports playback: {@code positionMs}, {@code durationMs}, {@code state}. */
+    public static final int TYPE_MEDIA_STATE = 13;
+
     // ---- Packet flags ----------------------------------------------------
 
     /** Payload is a keyframe/IDR. */
     public static final int FLAG_KEYFRAME = 0x01;
+
+    /** On {@link #TYPE_MEDIA_DATA}: this chunk completes the requested range. */
+    public static final int FLAG_LAST_CHUNK = 0x02;
 
     // ---- Handshake status codes -----------------------------------------
 
@@ -59,6 +82,13 @@ public final class BplayProtocol {
     public static final int STATUS_BAD_PIN = 1;
     public static final int STATUS_BUSY = 2;
     public static final int STATUS_BAD_VERSION = 3;
+
+    /**
+     * Handshake response key: present and "1" when the receiver can play an offered file itself.
+     * Senders that see it skip transcoding; senders that do not fall back to the mirroring path,
+     * so an older television still shows the video, just re-encoded.
+     */
+    public static final String KEY_SUPPORTS_MEDIA = "media";
 
     /** Fixed-size packet header: type(1) flags(1) length(4) ptsUs(8). */
     public static final int HEADER_SIZE = 14;

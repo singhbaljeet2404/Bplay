@@ -213,13 +213,21 @@ public final class WebServer extends NanoWSD {
                 return;
             }
             session.setOnClose(() -> closeQuietly("Session ended"));
+            session.setReverseChannel((type, flags, ptsUs, body) -> {
+                try {
+                    send(Packet.toBytes(type, flags, ptsUs, body));
+                } catch (IOException e) {
+                    Log.i(TAG, "Could not reach the browser: " + e.getMessage());
+                }
+            });
 
             ByteArrayOutputStream reply = new ByteArrayOutputStream();
             HandshakeCodec.writeResponse(reply, BplayProtocol.STATUS_OK, new Params()
                     .put(HandshakeCodec.KEY_NAME, host.deviceName())
                     .put(HandshakeCodec.KEY_MAX_WIDTH, host.maxHeight() * 16 / 9)
                     .put(HandshakeCodec.KEY_MAX_HEIGHT, host.maxHeight())
-                    .put(HandshakeCodec.KEY_MAX_BITRATE, host.maxBitrate()));
+                    .put(HandshakeCodec.KEY_MAX_BITRATE, host.maxBitrate())
+                    .put(BplayProtocol.KEY_SUPPORTS_MEDIA, true));
             send(reply.toByteArray());
         }
 

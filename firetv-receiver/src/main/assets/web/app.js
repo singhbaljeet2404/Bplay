@@ -14,10 +14,14 @@
 const {
   TYPE,
   FLAG_KEYFRAME,
+  FLAG_LAST_CHUNK,
   encodeParams,
+  decodeParams,
   buildHandshake,
   parseHandshakeResponse,
   buildPacket,
+  parsePacket,
+  buildMediaChunk,
 } = BPlayWire;
 
 const STATUS_TEXT = {
@@ -63,6 +67,11 @@ const ui = {
   statRate: document.getElementById('stat-rate'),
   statDrop: document.getElementById('stat-drop'),
   fileControls: document.getElementById('file-controls'),
+  transport: document.getElementById('transport'),
+  playPause: document.getElementById('play-pause'),
+  seek: document.getElementById('seek'),
+  elapsed: document.getElementById('elapsed'),
+  duration: document.getElementById('duration'),
   filePosition: document.getElementById('file-position'),
   prev: document.getElementById('prev'),
   next: document.getElementById('next'),
@@ -94,18 +103,119 @@ class MirrorSender {
     this.generation = 0;
   }
 
-  async start({ source, pin, maxHeight }) {
-    this.source = source;
-    await this.connect(pin, source);
+  async start({ source, file, pin, maxHeight, wantAudio }) {
     this.maxHeight = maxHeight;
+    this.wantAudio = wantAudio;
+
+    // A file needs no dimensions in the handshake: if the TV plays it natively, nothing here
+    // ever decodes it, and if it does not, the fallback opens it afterwards.
+    await this.connect(pin, source || { width: 0, height: 0, fps: 30, kind: 'video-file' });
     this.running = true;
 
-    this.startVideo(source);
-    this.startAudio(source);
+    if (file && this.tvSupportsMedia) {
+      this.mode = 'native';
+      this.playFileOnTv(file);
+    } else {
+      if (file) {
+        // Older TV: fall back to transcoding, which at least shows something.
+        source = await BPlaySources.openFile(file, wantAudio);
+      }
+      this.mode = 'stream';
+      this.source = source;
+      this.startVideo(source);
+      this.startAudio(source);
+    }
 
     this.pingTimer = setInterval(
       () => this.send(buildPacket(TYPE.PING, 0, 0, new Uint8Array(0))), 2000);
     this.statsTimer = setInterval(() => this.reportStats(), 1000);
+  }
+
+  // ---- native file playback -------------------------------------------
+
+  /**
+   * Hands the TV the file itself rather than a re-encode of it. Nothing is uploaded up front:
+   * the TV asks for the ranges its player actually reads, so a three-gigabyte film starts as
+   * quickly as a small one and seeking is real seeking.
+   */
+  playFileOnTv(file) {
+    this.currentFile = file;
+    this.mediaId = String(Date.now());
+    this.send(buildPacket(TYPE.MEDIA_OFFER, 0, 0, encodeParams({
+      id: this.mediaId,
+      name: file.name,
+      mime: file.type || guessMime(file.name),
+      size: file.size,
+      kind: isImageFile(file) ? 'image' : 'video',
+    })));
+    ui.statSize.textContent = formatBytes(file.size);
+    ui.statRate.textContent = '\u2014';
+    ui.statFps.textContent = 'Native';
+  }
+
+  onReceiverPacket(data) {
+    let packet;
+    try {
+      packet = parsePacket(data);
+    } catch (error) {
+      return;
+    }
+    if (packet.type === TYPE.MEDIA_REQUEST) {
+      this.serveRange(decodeParams(packet.payload));
+    } else if (packet.type === TYPE.MEDIA_STATE) {
+      onPlaybackState(decodeParams(packet.payload));
+    }
+  }
+
+  /** Answers one range request by slicing the file, which never reads the whole thing. */
+  async serveRange(params) {
+    const requestId = parseInt(params.req, 10);
+    const offset = parseInt(params.offset, 10);
+    const length = parseInt(params.length, 10);
+    const file = this.currentFile;
+    if (!file || !Number.isFinite(requestId)) return;
+
+    try {
+      const slice = file.slice(offset, offset + length);
+      const bytes = new Uint8Array(await slice.arrayBuffer());
+      const MAX = 64 * 1024;
+      for (let sent = 0; sent < bytes.length; sent += MAX) {
+        const part = bytes.subarray(sent, Math.min(sent + MAX, bytes.length));
+        const last = sent + MAX >= bytes.length;
+        const ok = await this.sendReliable(buildPacket(TYPE.MEDIA_DATA,
+          last ? FLAG_LAST_CHUNK : 0, 0, buildMediaChunk(requestId, offset + sent, part)));
+        if (!ok) return;
+      }
+      if (bytes.length === 0) {
+        await this.sendReliable(buildPacket(TYPE.MEDIA_DATA, FLAG_LAST_CHUNK, 0,
+          buildMediaChunk(requestId, offset, new Uint8Array(0))));
+      }
+      this.send(buildPacket(TYPE.MEDIA_END, 0, 0, encodeParams({ req: requestId })));
+    } catch (error) {
+      this.send(buildPacket(TYPE.MEDIA_END, 0, 0,
+        encodeParams({ req: requestId, error: 'Could not read the file on this device' })));
+    }
+  }
+
+  sendControl(action, positionMs) {
+    this.send(buildPacket(TYPE.MEDIA_CONTROL, 0, 0,
+      encodeParams({ action, positionMs: Math.max(0, Math.round(positionMs || 0)) })));
+  }
+
+  /**
+   * File bytes must never be dropped, so this waits for the socket to drain rather than
+   * discarding like {@link send} does. A missing frame is a glitch; a missing byte is a
+   * corrupt file the TV's decoder will choke on.
+   */
+  async sendReliable(bytes) {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    while (socket.bufferedAmount > 2 * 1024 * 1024) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      if (!this.running || socket.readyState !== WebSocket.OPEN) return false;
+    }
+    socket.send(bytes);
+    return true;
   }
 
   connect(pin, source) {
@@ -150,7 +260,10 @@ class MirrorSender {
         this.tvName = response.params.name || 'your Fire TV';
         this.tvMaxHeight = parseInt(response.params.maxHeight, 10) || 0;
         this.tvMaxBitrate = parseInt(response.params.maxBitrate, 10) || 8000000;
-        socket.onmessage = null; // the TV says nothing more after the handshake
+        this.tvSupportsMedia = response.params.media === '1';
+        // The TV used to say nothing after the handshake. It does now: when it plays a file
+        // itself it asks for byte ranges, and reports where playback has got to.
+        socket.onmessage = (next) => this.onReceiverPacket(next.data);
         resolve();
       };
 
@@ -478,6 +591,10 @@ class MirrorSender {
   }
 
   reportStats() {
+    if (this.mode === 'native') {
+      ui.liveDetail.textContent = 'Playing on ' + (this.tvName || 'your Fire TV');
+      return;
+    }
     const fps = this.framesSent;
     const mbps = (this.bytesSent * 8) / 1e6;
     this.framesSent = 0;
@@ -574,6 +691,35 @@ function bitrateFor(height) {
   return 8000000;
 }
 
+function isImageFile(file) {
+  return (file.type || '').startsWith('image/')
+    || /\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(file.name);
+}
+
+/** iOS often hands over a file with an empty type, so fall back to the extension. */
+function guessMime(name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  return {
+    mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska',
+    webm: 'video/webm', avi: 'video/x-msvideo', '3gp': 'video/3gpp',
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+    webp: 'image/webp', heic: 'image/heic', bmp: 'image/bmp',
+  }[ext] || 'application/octet-stream';
+}
+
+function formatBytes(bytes) {
+  if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+  if (bytes >= 1e6) return (bytes / 1e6).toFixed(0) + ' MB';
+  return Math.max(1, Math.round(bytes / 1e3)) + ' KB';
+}
+
+function formatTime(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return minutes + ':' + String(seconds).padStart(2, '0');
+}
+
 /** A name the TV can show, without fingerprinting anything the user did not volunteer. */
 function describeThisDevice(source) {
   const agent = navigator.userAgent;
@@ -668,11 +814,45 @@ async function advanceFile(delta, fromPlaybackEnd) {
   }
   fileIndex = next;
   updateFilePosition();
+  const file = fileList[fileIndex];
   try {
-    const source = await BPlaySources.openFile(fileList[fileIndex], ui.wantAudio.checked);
-    await session.replaceSource(source);
+    if (session.mode === 'native') {
+      // A fresh offer; the TV restarts its player on the new file.
+      session.playFileOnTv(file);
+      ui.liveTitle.textContent = (isImageFile(file) ? 'Photo on ' : 'Video on ')
+        + (session.tvName || 'your Fire TV');
+      ui.transport.hidden = isImageFile(file);
+      resetTransport();
+    } else {
+      const source = await BPlaySources.openFile(file, ui.wantAudio.checked);
+      await session.replaceSource(source);
+    }
   } catch (error) {
     session.stop(error.message);
+  }
+}
+
+// ---- transport controls (native playback only) ----------------------------
+
+let scrubbing = false;
+
+function resetTransport() {
+  ui.seek.value = '0';
+  ui.elapsed.textContent = '0:00';
+  ui.duration.textContent = '0:00';
+  ui.playPause.textContent = 'Pause';
+}
+
+function onPlaybackState(params) {
+  const position = parseInt(params.positionMs, 10) || 0;
+  const duration = parseInt(params.durationMs, 10) || 0;
+  const playing = params.state === 'playing';
+  ui.playPause.textContent = playing ? 'Pause' : 'Play';
+  ui.elapsed.textContent = formatTime(position);
+  ui.duration.textContent = formatTime(duration);
+  if (!scrubbing && duration > 0) {
+    ui.seek.max = String(duration);
+    ui.seek.value = String(Math.min(position, duration));
   }
 }
 
@@ -710,11 +890,20 @@ async function begin() {
   showSetupError('');
   ui.start.disabled = true;
 
-  let source;
+  let source = null;
+  let file = null;
+
   try {
-    // Acquired before connecting so the permission prompt still counts as a user gesture,
-    // which iOS requires for both the camera and starting video playback.
-    source = await acquireSelectedSource();
+    if (selectedKind === 'files') {
+      fileList = Array.from(ui.files.files || []);
+      if (!fileList.length) throw new Error('Choose a photo or video first.');
+      fileIndex = 0;
+      file = fileList[0];
+    } else {
+      // Acquired before connecting so the permission prompt still counts as a user gesture,
+      // which iOS requires for the camera.
+      source = await acquireSelectedSource();
+    }
   } catch (error) {
     ui.start.disabled = false;
     const aborted = error && (error.name === 'NotAllowedError' || error.name === 'AbortError');
@@ -722,7 +911,7 @@ async function begin() {
     return;
   }
 
-  if (source.track) {
+  if (source && source.track) {
     source.track.addEventListener('ended', () => {
       if (session) session.stop('You stopped sharing');
     });
@@ -732,21 +921,29 @@ async function begin() {
   try {
     await session.start({
       source,
+      file,
       pin: ui.pin.value.trim(),
       maxHeight: parseInt(ui.quality.value, 10),
+      wantAudio: ui.wantAudio.checked,
     });
     ui.panelSetup.hidden = true;
     ui.panelLive.hidden = false;
-    ui.liveTitle.textContent = sourceHeadline(source, session.tvName);
+    ui.liveTitle.textContent = file
+      ? (isImageFile(file) ? 'Photo on ' : 'Video on ') + (session.tvName || 'your Fire TV')
+      : sourceHeadline(source, session.tvName);
     if (session.tvName) ui.tvName.textContent = session.tvName;
 
     ui.fileControls.hidden = selectedKind !== 'files';
     ui.flip.hidden = selectedKind !== 'camera';
+    // Transport controls only make sense when the TV is the one playing the file.
+    ui.transport.hidden = !(session.mode === 'native' && file && !isImageFile(file));
     updateFilePosition();
   } catch (error) {
     if (session) session.stop(null);
     session = null;
-    try { source.stop(); } catch (stopError) { /* already released */ }
+    if (source) {
+      try { source.stop(); } catch (stopError) { /* already released */ }
+    }
     ui.start.disabled = false;
     showSetupError(error.message || String(error));
   }
@@ -809,6 +1006,22 @@ function init() {
   ui.prev.addEventListener('click', () => advanceFile(-1, false));
   ui.next.addEventListener('click', () => advanceFile(1, false));
   ui.flip.addEventListener('click', flipCamera);
+  ui.playPause.addEventListener('click', () => {
+    if (!session) return;
+    const pausing = ui.playPause.textContent === 'Pause';
+    session.sendControl(pausing ? 'pause' : 'play', 0);
+    ui.playPause.textContent = pausing ? 'Play' : 'Pause';
+  });
+  // Track the drag locally, and only tell the TV when the thumb is let go -- a seek per pixel
+  // would have it thrashing its buffer.
+  ui.seek.addEventListener('input', () => {
+    scrubbing = true;
+    ui.elapsed.textContent = formatTime(parseInt(ui.seek.value, 10) || 0);
+  });
+  ui.seek.addEventListener('change', () => {
+    scrubbing = false;
+    if (session) session.sendControl('seek', parseInt(ui.seek.value, 10) || 0);
+  });
   window.addEventListener('pagehide', () => session && session.stop(null));
 
   fetch('/info').then((response) => response.json()).then((info) => {
