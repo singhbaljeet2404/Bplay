@@ -16,6 +16,11 @@ Open the **Downloader** app on your Fire TV and enter this address:
 https://github.com/singhbaljeet2404/Bplay/releases/latest/download/bplay-firetv.apk
 ```
 
+> **The repository must be public for this to work.** Release assets on a private repository are
+> only served to authenticated clients, and Downloader on a Fire TV is not one, so the address
+> above returns 404 while the repo is private. Change it under *Settings → General → Change
+> visibility*. Nothing needs rebuilding — the link starts working immediately.
+
 Downloader fetches the file and offers to install it. Then open **BPlay Mirror** from the Fire TV
 home screen — the address, PIN and a QR code you need are all on that first screen.
 

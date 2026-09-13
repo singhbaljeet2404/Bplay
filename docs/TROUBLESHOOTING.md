@@ -81,12 +81,26 @@ session.
 The PIN changes if the app is reinstalled or you press **New PIN**. Use what the TV shows now.
 Scanning the QR code fills it in automatically and avoids the problem.
 
+## Downloader says "file not found" or shows a 404 page
+
+The release URL only works if the GitHub repository is **public**. Release assets on a private
+repository are served only to authenticated clients, and Downloader is not one, so it gets a 404
+even though the release exists and the link is correct.
+
+Check by opening `https://github.com/<owner>/<repo>` in a private browser window: if that 404s for
+you, it 404s for the Fire TV too. Fix it under *Settings → General → Change visibility*, or
+sideload the APK another way (see below).
+
 ## Installing the APK fails on the Fire TV
 
 - Turn on *Install unknown apps* for Downloader (see the README).
 - If you previously installed a build signed with a different key, uninstall it first — Android
   refuses to replace an app with one signed by a different key.
 - Make sure the download completed; a truncated file fails to parse.
+
+To sideload without Downloader: `adb connect <fire-tv-ip>:5555` then `adb install bplay-firetv.apk`
+(enable ADB debugging under Settings → My Fire TV → Developer Options first), or copy the APK to a
+USB drive and install it with a file manager.
 
 ## Reporting something else
 

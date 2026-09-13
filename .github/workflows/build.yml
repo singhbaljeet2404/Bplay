@@ -136,5 +136,14 @@ jobs:
             --notes-file .github/release-notes.md \
             dist/bplay-firetv.apk \
             dist/bplay-sender.apk
-          echo "Install URL is now live:"
-          echo "  https://github.com/$GITHUB_REPOSITORY/releases/latest/download/bplay-firetv.apk"
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/latest/download/bplay-firetv.apk"
+          # A private repository serves release assets only to authenticated clients, and the
+          # Downloader app on a Fire TV is not one. The release publishes fine either way, so
+          # this is a warning rather than a failure -- but without it the link looks correct
+          # and 404s on the television with nothing to explain why.
+          if [ "$(gh repo view "$GITHUB_REPOSITORY" --json isPrivate --jq .isPrivate)" = "true" ]; then
+            echo "::warning title=Install link will not work yet::$GITHUB_REPOSITORY is private, so $URL returns 404 to the Fire TV. Make the repository public (Settings -> General -> Change visibility) to use Downloader; the release itself is already published."
+          else
+            echo "Install URL is now live:"
+            echo "  $URL"
+          fi
