@@ -136,14 +136,34 @@ jobs:
             --notes-file .github/release-notes.md \
             dist/bplay-firetv.apk \
             dist/bplay-sender.apk
+          echo "Published $VERSION"
+
+      # Fetches the install URL the way a Fire TV does -- no credentials -- because that is the
+      # only thing that actually proves Downloader can reach it. A release can publish perfectly
+      # and still be unreachable: assets on a private repository are served only to authenticated
+      # clients, so the link looks correct and 404s on the television with nothing to explain it.
+      # Runs on every build, not just the one that cuts a release, so the state cannot go stale.
+      - name: Check the install link is reachable without credentials
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
           URL="https://github.com/$GITHUB_REPOSITORY/releases/latest/download/bplay-firetv.apk"
-          # A private repository serves release assets only to authenticated clients, and the
-          # Downloader app on a Fire TV is not one. The release publishes fine either way, so
-          # this is a warning rather than a failure -- but without it the link looks correct
-          # and 404s on the television with nothing to explain why.
-          if [ "$(gh repo view "$GITHUB_REPOSITORY" --json isPrivate --jq .isPrivate)" = "true" ]; then
-            echo "::warning title=Install link will not work yet::$GITHUB_REPOSITORY is private, so $URL returns 404 to the Fire TV. Make the repository public (Settings -> General -> Change visibility) to use Downloader; the release itself is already published."
-          else
-            echo "Install URL is now live:"
+          if ! gh release list --limit 1 | grep -q .; then
+            echo "No release published yet, so there is nothing for Downloader to fetch."
+            exit 0
+          fi
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 -L "$URL" || echo "000")
+          echo "Unauthenticated GET $URL -> HTTP $CODE"
+          if [ "$CODE" = "200" ] || [ "$CODE" = "206" ]; then
+            echo "Install link is reachable. On the Fire TV, enter into Downloader:"
             echo "  $URL"
+            exit 0
+          fi
+          PRIVATE=$(gh repo view "$GITHUB_REPOSITORY" --json isPrivate --jq .isPrivate 2>/dev/null || echo unknown)
+          if [ "$PRIVATE" = "true" ]; then
+            echo "::warning title=Install link unreachable: repository is private::The release is published, but GitHub serves its assets only to authenticated clients, and Downloader on a Fire TV is not one. Make the repository public under Settings -> General -> Change visibility. Nothing needs rebuilding."
+          else
+            echo "::warning title=Install link unreachable::$URL returned HTTP $CODE to an unauthenticated client. Check the release assets are named bplay-firetv.apk and bplay-sender.apk."
           fi
