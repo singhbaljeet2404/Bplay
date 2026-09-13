@@ -20,9 +20,13 @@ the Fire TV home screen. Everything you need is on that screen.
 
 | Device | What to do |
 | --- | --- |
-| Windows, Mac, Linux, Chromebook | Open the `https://` address shown on the TV in any modern browser. Nothing to install. |
+| Windows, Mac, Linux, Chromebook | Open the `https://` address shown on the TV in any modern browser. Mirror a screen, share a camera, or cast photos and video. Nothing to install. |
 | Android phone or tablet | Install `bplay-sender.apk` below, or just use Chrome. |
-| iPhone or iPad | Build the sender app from `ios-sender/` — Safari cannot capture a screen on iOS. |
+| iPhone or iPad | Open the same address in Safari for **camera, photos and video** — nothing to install. Screen mirroring needs the app in `ios-sender/`, because no iOS browser can capture a screen. |
+
+**AirPlay?** Not possible here — it needs Apple's licensing. See `docs/AIRPLAY.md` for what does
+work, including licensed receiver apps that install on the Fire TV and leave your iPhone
+untouched.
 
 ## Files
 
