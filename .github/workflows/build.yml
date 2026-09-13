@@ -48,6 +48,15 @@ jobs:
       - name: Check wire-format conformance (JavaScript side)
         run: node tools/wire-check.js
 
+      # The sender page is the only part of this a user reaches without installing anything, so
+      # it gets loaded in a real browser -- including a simulated iPhone, where screen capture
+      # does not exist and the page has to fall back to camera and files instead of dead-ending.
+      - name: Browser test of the sender page
+        run: |
+          npm install --no-save --no-fund --no-audit playwright-core
+          npx --yes playwright install chromium
+          node tools/page-test.js
+
       - name: Unit tests
         run: ./gradlew :protocol:test --stacktrace
 

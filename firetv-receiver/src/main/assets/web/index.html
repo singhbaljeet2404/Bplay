@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='4' fill='%230b1020'/%3E%3Cpath fill='%234dd0e1' d='M4 6h16v10h-5v2h5a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v2h2z'/%3E%3Cpath fill='%236ee7a8' d='M2 20v2h2a2 2 0 0 0-2-2zm0-3v1.5A3.5 3.5 0 0 1 5.5 22H7a5 5 0 0 0-5-5zm0-3v1.5A6.5 6.5 0 0 1 8.5 22H10A8 8 0 0 0 2 14z'/%3E%3C/svg%3E">
 <title>BPlay Mirror</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -21,14 +22,35 @@
   </header>
 
   <section id="panel-unsupported" class="card danger" hidden>
-    <h2>This browser can't capture a screen</h2>
+    <h2>This browser can't send anything</h2>
     <p id="unsupported-reason"></p>
-    <p class="muted">Chrome, Edge, Firefox and Safari on a desktop or laptop all work.
-      On iPhone and iPad no browser can share the screen at all &mdash; that is an iOS
-      restriction, not a BPlay one &mdash; so use the BPlay Sender app instead.</p>
   </section>
 
   <section id="panel-setup" class="card">
+    <div class="field">
+      <label id="source-label">What should the TV show?</label>
+      <div class="sources" role="radiogroup" aria-labelledby="source-label">
+        <button type="button" class="source" id="source-screen" role="radio" aria-checked="true">
+          <span class="source-title">This screen</span>
+          <span class="source-note">Mirror everything</span>
+        </button>
+        <button type="button" class="source" id="source-camera" role="radio" aria-checked="false">
+          <span class="source-title">Camera</span>
+          <span class="source-note">Live from this device</span>
+        </button>
+        <button type="button" class="source" id="source-files" role="radio" aria-checked="false">
+          <span class="source-title">Photos &amp; video</span>
+          <span class="source-note">From this device</span>
+        </button>
+      </div>
+      <p id="source-hint" class="muted"></p>
+    </div>
+
+    <div class="field" id="file-field" hidden>
+      <label for="files">Choose photos or a video</label>
+      <input type="file" id="files" accept="image/*,video/*" multiple>
+    </div>
+
     <div class="field">
       <label for="pin">PIN shown on the TV</label>
       <input id="pin" inputmode="numeric" autocomplete="off" maxlength="4"
@@ -50,7 +72,7 @@
       <span>Send audio too <em id="audio-note"></em></span>
     </label>
 
-    <button id="start" class="primary">Start mirroring</button>
+    <button id="start" class="primary">Start</button>
     <p id="setup-error" class="error" hidden></p>
   </section>
 
@@ -68,8 +90,24 @@
       <div><dt>Bitrate</dt><dd id="stat-rate">&ndash;</dd></div>
       <div><dt>Dropped</dt><dd id="stat-drop">0</dd></div>
     </dl>
-    <button id="stop" class="danger-btn">Stop mirroring</button>
+    <div id="file-controls" class="file-controls" hidden>
+      <button type="button" id="prev" class="ghost">&larr; Previous</button>
+      <span id="file-position" class="muted"></span>
+      <button type="button" id="next" class="ghost">Next &rarr;</button>
+    </div>
+    <button type="button" id="flip" class="ghost" hidden>Switch camera</button>
+    <button id="stop" class="danger-btn">Stop</button>
   </section>
+
+  <details class="card faq">
+    <summary>On an iPhone or iPad? Screen mirroring is the one thing Safari can't do</summary>
+    <p>No browser on iOS can capture the screen &mdash; Apple allows no screen-capture API, and
+      requires every iOS browser to use Safari's engine, so Chrome and Firefox cannot either.</p>
+    <p><strong>Camera and Photos &amp; video above work fine</strong>, with nothing installed. For
+      full screen mirroring you need either the BPlay sender app (built from source, free) or an
+      AirPlay receiver app installed <em>on the Fire TV</em> &mdash; see
+      <code>docs/AIRPLAY.md</code> in the project.</p>
+  </details>
 
   <details class="card faq">
     <summary>The browser warned me the connection isn't private</summary>
@@ -101,6 +139,7 @@
   </footer>
 </main>
 <script src="wire.js"></script>
+<script src="sources.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

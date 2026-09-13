@@ -1,12 +1,13 @@
 /*
  * BPlay browser sender.
  *
- * Captures a screen with getDisplayMedia, encodes it to H.264 with WebCodecs, and pushes the
- * result down a WebSocket as the same packets the native sender apps send over TCP. Because the
- * encoder emits Annex-B, the Fire TV feeds those bytes straight to MediaCodec -- there is no
- * container, no transcode, and no separate code path for browsers on the receiving end.
+ * Captures a source -- the screen, a camera, or a photo or video from this device -- encodes it to
+ * H.264 with WebCodecs, and pushes the result down a WebSocket as the same packets the native
+ * sender apps send over TCP. The encoder emits Annex-B, so the Fire TV feeds those bytes straight
+ * to MediaCodec: no container, no transcode, and one decode path on the television regardless of
+ * which of the three sources, or which platform, a frame came from.
  *
- * The byte-level format lives in wire.js, which loads first.
+ * The byte-level format lives in wire.js and the source handling in sources.js; both load first.
  */
 'use strict';
 
@@ -18,13 +19,6 @@ const {
   parseHandshakeResponse,
   buildPacket,
 } = BPlayWire;
-
-const TYPE_VIDEO = TYPE.VIDEO;
-const TYPE_AUDIO_CONFIG = TYPE.AUDIO_CONFIG;
-const TYPE_AUDIO = TYPE.AUDIO;
-const TYPE_PING = TYPE.PING;
-const TYPE_BYE = TYPE.BYE;
-const TYPE_META = TYPE.META;
 
 const STATUS_TEXT = {
   0: 'Connected',
@@ -49,6 +43,12 @@ const ui = {
   unsupportedReason: document.getElementById('unsupported-reason'),
   panelSetup: document.getElementById('panel-setup'),
   panelLive: document.getElementById('panel-live'),
+  sourceScreen: document.getElementById('source-screen'),
+  sourceCamera: document.getElementById('source-camera'),
+  sourceFiles: document.getElementById('source-files'),
+  sourceHint: document.getElementById('source-hint'),
+  fileField: document.getElementById('file-field'),
+  files: document.getElementById('files'),
   pin: document.getElementById('pin'),
   quality: document.getElementById('quality'),
   wantAudio: document.getElementById('want-audio'),
@@ -62,26 +62,12 @@ const ui = {
   statFps: document.getElementById('stat-fps'),
   statRate: document.getElementById('stat-rate'),
   statDrop: document.getElementById('stat-drop'),
+  fileControls: document.getElementById('file-controls'),
+  filePosition: document.getElementById('file-position'),
+  prev: document.getElementById('prev'),
+  next: document.getElementById('next'),
+  flip: document.getElementById('flip'),
 };
-
-// ---------------------------------------------------------------------------
-// Capability detection
-// ---------------------------------------------------------------------------
-
-function missingCapability() {
-  if (!window.isSecureContext) {
-    return 'This page was not loaded over HTTPS, so the browser blocks screen capture. '
-      + 'Open the https:// address shown on the TV.';
-  }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-    return 'This browser has no screen-capture API. On iPhone and iPad, no browser does.';
-  }
-  if (typeof window.VideoEncoder === 'undefined') {
-    return 'This browser has no WebCodecs video encoder. Chrome 94+, Edge 94+, '
-      + 'Safari 16.4+ and Firefox 133+ all have one.';
-  }
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Session
@@ -90,57 +76,35 @@ function missingCapability() {
 class MirrorSender {
   constructor() {
     this.socket = null;
-    this.stream = null;
+    this.source = null;
     this.videoEncoder = null;
     this.audioEncoder = null;
+    this.audioContext = null;
+    this.audioProcessor = null;
     this.running = false;
-    this.startedAt = 0;
     this.lastKeyframeAt = 0;
     this.framesSent = 0;
     this.framesDropped = 0;
     this.bytesSent = 0;
     this.statsTimer = null;
     this.pingTimer = null;
-    this.abort = null;
+    this.stopDrawing = null;
+    // Bumped whenever the source changes, so a draw loop for an old source exits rather than
+    // racing the new one into the encoder.
+    this.generation = 0;
   }
 
-  async start({ pin, maxHeight, wantAudio }) {
-    this.stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 30, max: 30 } },
-      audio: wantAudio,
-    });
-
-    const videoTrack = this.stream.getVideoTracks()[0];
-    if (!videoTrack) throw new Error('No screen was shared.');
-    // Fires when the user hits the browser's own "Stop sharing" bar.
-    videoTrack.addEventListener('ended', () => this.stop('You stopped sharing'));
-
-    const settings = videoTrack.getSettings();
-    const source = {
-      width: settings.width || 1280,
-      height: settings.height || 720,
-    };
-
+  async start({ source, pin, maxHeight }) {
+    this.source = source;
     await this.connect(pin, source);
-
-    // Both ceilings apply: the TV's limit and whatever the user picked. Taking the TV's alone
-    // would silently ignore someone who chose 720p to get a smoother picture.
-    const ceiling = Math.min(maxHeight, this.tvMaxHeight || maxHeight);
-    const size = scaleToFit(source.width, source.height, ceiling);
-    this.width = size.width;
-    this.height = size.height;
-
-    this.startedAt = performance.now();
+    this.maxHeight = maxHeight;
     this.running = true;
-    this.startVideo(videoTrack, size);
 
-    const audioTrack = this.stream.getAudioTracks()[0];
-    if (audioTrack) {
-      this.startAudio(audioTrack);
-    }
+    this.startVideo(source);
+    this.startAudio(source);
 
-    this.pingTimer = setInterval(() => this.send(buildPacket(TYPE_PING, 0, 0, new Uint8Array(0))),
-      2000);
+    this.pingTimer = setInterval(
+      () => this.send(buildPacket(TYPE.PING, 0, 0, new Uint8Array(0))), 2000);
     this.statsTimer = setInterval(() => this.reportStats(), 1000);
   }
 
@@ -159,11 +123,11 @@ class MirrorSender {
       socket.onopen = () => {
         socket.send(buildHandshake({
           pin: pin || '',
-          name: describeThisDevice(),
+          name: describeThisDevice(source),
           platform: 'web',
           width: source.width,
           height: source.height,
-          fps: 30,
+          fps: source.fps,
           vcodec: 'video/avc',
         }));
       };
@@ -178,17 +142,15 @@ class MirrorSender {
           return;
         }
         if (response.status !== 0) {
-          const message = response.params.error
+          reject(new Error(response.params.error
             || STATUS_TEXT[response.status]
-            || ('The TV refused the connection (' + response.status + ')');
-          reject(new Error(message));
+            || ('The TV refused the connection (' + response.status + ')')));
           return;
         }
         this.tvName = response.params.name || 'your Fire TV';
         this.tvMaxHeight = parseInt(response.params.maxHeight, 10) || 0;
         this.tvMaxBitrate = parseInt(response.params.maxBitrate, 10) || 8000000;
-        // From here on, messages are not expected: the TV only talks during the handshake.
-        socket.onmessage = null;
+        socket.onmessage = null; // the TV says nothing more after the handshake
         resolve();
       };
 
@@ -205,15 +167,24 @@ class MirrorSender {
     });
   }
 
-  startVideo(track, size) {
+  // ---- video ----------------------------------------------------------
+
+  startVideo(source) {
+    // Both ceilings apply: the TV's limit and whatever the user picked. Taking the TV's alone
+    // would silently ignore someone who chose 720p to get a smoother picture.
+    const ceiling = Math.min(this.maxHeight, this.tvMaxHeight || this.maxHeight);
+    const size = scaleToFit(source.width, source.height, ceiling);
+    this.width = size.width;
+    this.height = size.height;
+
     const bitrate = Math.min(bitrateFor(size.height), this.tvMaxBitrate || 8000000);
 
     this.videoEncoder = new VideoEncoder({
       output: (chunk) => {
         const payload = new Uint8Array(chunk.byteLength);
         chunk.copyTo(payload);
-        const flags = chunk.type === 'key' ? FLAG_KEYFRAME : 0;
-        this.send(buildPacket(TYPE_VIDEO, flags, chunk.timestamp, payload));
+        this.send(buildPacket(TYPE.VIDEO, chunk.type === 'key' ? FLAG_KEYFRAME : 0,
+          chunk.timestamp, payload));
         this.framesSent++;
         this.bytesSent += payload.length;
       },
@@ -228,71 +199,97 @@ class MirrorSender {
       width: size.width,
       height: size.height,
       bitrate,
-      framerate: 30,
+      framerate: source.fps,
       latencyMode: 'realtime',
     });
 
-    this.send(buildPacket(TYPE_META, 0, 0,
+    this.send(buildPacket(TYPE.META, 0, 0,
       encodeParams({ width: size.width, height: size.height })));
 
-    this.pumpVideo(track, size).catch((error) => {
+    this.pump(source, size).catch((error) => {
       if (this.running) this.stop('Capture stopped: ' + error.message);
     });
   }
 
   /**
-   * Two ways to get frames out of a MediaStreamTrack.
+   * Turns whatever the source is into VideoFrames.
    *
-   * MediaStreamTrackProcessor is the good one -- real VideoFrames with real timestamps, no copy
-   * through a canvas -- but it is Chromium-only. Everywhere else, a hidden <video> painted into a
-   * canvas produces the same VideoFrames at some cost in CPU.
+   * MediaStreamTrackProcessor is the good path -- real frames with real timestamps and no copy --
+   * but it is Chromium-only and does not exist for a file at all. Everywhere else, and for every
+   * photo and video file, frames are painted into a canvas instead. That costs some CPU and is
+   * the only reason an iPhone can put anything on the television at all.
    */
-  async pumpVideo(track, size) {
-    if ('MediaStreamTrackProcessor' in window) {
-      const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
-      this.abort = () => reader.cancel().catch(() => {});
-      while (this.running) {
+  async pump(source, size) {
+    const generation = ++this.generation;
+    const alive = () => this.running && this.generation === generation;
+
+    if (source.track && 'MediaStreamTrackProcessor' in window) {
+      const reader = new MediaStreamTrackProcessor({ track: source.track }).readable.getReader();
+      this.stopDrawing = () => reader.cancel().catch(() => {});
+      while (alive()) {
         const { value: frame, done } = await reader.read();
         if (done) break;
+        if (!alive()) { frame.close(); break; }
         this.encodeFrame(frame);
       }
       return;
     }
 
-    const video = document.createElement('video');
-    video.srcObject = new MediaStream([track]);
-    video.muted = true;
-    video.playsInline = true;
-    await video.play();
-
+    const drawable = await this.drawableFor(source);
     const canvas = document.createElement('canvas');
     canvas.width = size.width;
     canvas.height = size.height;
     const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 
     const startedAt = performance.now();
+    let stopped = false;
+    this.stopDrawing = () => { stopped = true; };
+
     const drawOnce = () => {
-      if (!this.running) return;
-      context.drawImage(video, 0, 0, size.width, size.height);
+      if (stopped || !alive()) return;
+      try {
+        context.drawImage(drawable, 0, 0, size.width, size.height);
+      } catch (error) {
+        return; // the element was torn down mid-frame
+      }
       const frame = new VideoFrame(canvas, {
         timestamp: Math.round((performance.now() - startedAt) * 1000),
       });
       this.encodeFrame(frame);
       schedule();
     };
+
     const schedule = () => {
-      if (!this.running) return;
-      if (video.requestVideoFrameCallback) {
-        video.requestVideoFrameCallback(drawOnce);
+      if (stopped || !alive()) return;
+      if (source.kind === 'image') {
+        setTimeout(drawOnce, 1000 / source.fps);
+      } else if (drawable.requestVideoFrameCallback) {
+        drawable.requestVideoFrameCallback(drawOnce);
       } else {
-        setTimeout(drawOnce, 1000 / 30);
+        setTimeout(drawOnce, 1000 / source.fps);
       }
     };
-    this.abort = () => {
-      video.pause();
-      video.srcObject = null;
-    };
     schedule();
+  }
+
+  /** An element the canvas can draw: the source's own, or one wrapping its MediaStream. */
+  async drawableFor(source) {
+    if (source.element) {
+      if (source.kind === 'video-file') {
+        source.element.onended = () => {
+          if (this.running) advanceFile(1, true);
+        };
+        await source.element.play();
+      }
+      return source.element;
+    }
+    const video = document.createElement('video');
+    video.srcObject = source.stream;
+    video.muted = true;
+    video.playsInline = true;
+    await video.play();
+    this.wrapperVideo = video;
+    return video;
   }
 
   encodeFrame(frame) {
@@ -319,18 +316,40 @@ class MirrorSender {
     }
   }
 
-  /** Audio is a bonus, never a requirement: any failure leaves the video mirror running. */
-  startAudio(track) {
-    if (typeof window.AudioEncoder === 'undefined'
-      || !('MediaStreamTrackProcessor' in window)) {
-      return;
+  /** Swaps the source without dropping the connection -- next photo, or a flipped camera. */
+  async replaceSource(source) {
+    if (this.stopDrawing) {
+      try { this.stopDrawing(); } catch (error) { /* already stopped */ }
+      this.stopDrawing = null;
     }
+    this.generation++;
+    if (this.source && this.source !== source) {
+      try { this.source.stop(); } catch (error) { /* already released */ }
+    }
+    this.source = source;
+
+    closeQuietly(this.videoEncoder);
+    this.videoEncoder = null;
+    this.stopAudio();
+
+    this.startVideo(source);
+    this.startAudio(source);
+    ui.liveTitle.textContent = sourceHeadline(source, this.tvName);
+  }
+
+  // ---- audio ----------------------------------------------------------
+
+  /** Audio is a bonus, never a requirement: any failure leaves the picture running. */
+  startAudio(source) {
+    if (typeof window.AudioEncoder === 'undefined') return;
+    if (!source.audioTrack && !source.audioNode) return;
+
     try {
       this.audioEncoder = new AudioEncoder({
         output: (chunk) => {
           const payload = new Uint8Array(chunk.byteLength);
           chunk.copyTo(payload);
-          this.send(buildPacket(TYPE_AUDIO, 0, chunk.timestamp, payload));
+          this.send(buildPacket(TYPE.AUDIO, 0, chunk.timestamp, payload));
         },
         error: () => { this.audioEncoder = null; },
       });
@@ -343,26 +362,109 @@ class MirrorSender {
 
       // WebCodecs gives raw Opus packets with no identification header, so tell the TV what to
       // synthesise rather than sending codec-specific data that does not exist.
-      this.send(buildPacket(TYPE_AUDIO_CONFIG, 0, 0,
+      this.send(buildPacket(TYPE.AUDIO_CONFIG, 0, 0,
         encodeParams({ codec: 'opus', sampleRate: 48000, channels: 2 })));
 
-      const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
-      const pump = async () => {
-        while (this.running && this.audioEncoder) {
-          const { value: data, done } = await reader.read();
-          if (done) break;
-          try {
-            if (this.audioEncoder.state === 'configured') this.audioEncoder.encode(data);
-          } finally {
-            data.close();
-          }
-        }
-      };
-      pump().catch(() => { this.audioEncoder = null; });
+      if (source.audioTrack && 'MediaStreamTrackProcessor' in window) {
+        this.pumpAudioFromTrack(source.audioTrack);
+      } else {
+        this.pumpAudioViaWebAudio(source);
+      }
     } catch (error) {
       this.audioEncoder = null;
     }
   }
+
+  async pumpAudioFromTrack(track) {
+    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+    try {
+      while (this.running && this.audioEncoder) {
+        const { value: data, done } = await reader.read();
+        if (done) break;
+        try {
+          if (this.audioEncoder.state === 'configured') this.audioEncoder.encode(data);
+        } finally {
+          data.close();
+        }
+      }
+    } catch (error) {
+      this.audioEncoder = null;
+    }
+  }
+
+  /**
+   * The path for Safari and Firefox, which have no MediaStreamTrackProcessor: pull PCM out of a
+   * Web Audio graph and build AudioData by hand. ScriptProcessorNode is deprecated but is the
+   * only node available everywhere, and it only runs while connected to a destination -- hence
+   * the silent gain node, which keeps it pumping without the phone playing the sound aloud.
+   */
+  pumpAudioViaWebAudio(source) {
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (typeof AudioCtor !== 'function') return;
+
+    const context = source.audioContext || new AudioCtor();
+    this.audioContext = context;
+    if (context.state === 'suspended') context.resume().catch(() => {});
+
+    const node = source.audioNode
+      || (source.audioTrack ? context.createMediaStreamSource(new MediaStream([source.audioTrack]))
+        : null);
+    if (!node) return;
+
+    const channels = 2;
+    const processor = context.createScriptProcessor(4096, channels, channels);
+    const silence = context.createGain();
+    silence.gain.value = 0;
+
+    let timestamp = 0;
+    processor.onaudioprocess = (event) => {
+      if (!this.running || !this.audioEncoder) return;
+      const input = event.inputBuffer;
+      const frames = input.length;
+      const interleaved = new Float32Array(frames * channels);
+      for (let channel = 0; channel < channels; channel++) {
+        const samples = input.getChannelData(Math.min(channel, input.numberOfChannels - 1));
+        for (let i = 0; i < frames; i++) {
+          interleaved[i * channels + channel] = samples[i];
+        }
+      }
+      try {
+        const data = new AudioData({
+          format: 'f32',
+          sampleRate: input.sampleRate,
+          numberOfFrames: frames,
+          numberOfChannels: channels,
+          timestamp,
+          data: interleaved,
+        });
+        timestamp += Math.round((frames / input.sampleRate) * 1e6);
+        try {
+          if (this.audioEncoder.state === 'configured') this.audioEncoder.encode(data);
+        } finally {
+          data.close();
+        }
+      } catch (error) {
+        this.audioEncoder = null;
+      }
+    };
+
+    node.connect(processor);
+    processor.connect(silence);
+    silence.connect(context.destination);
+    this.audioProcessor = processor;
+  }
+
+  stopAudio() {
+    if (this.audioProcessor) {
+      try { this.audioProcessor.disconnect(); } catch (error) { /* already gone */ }
+      this.audioProcessor.onaudioprocess = null;
+      this.audioProcessor = null;
+    }
+    closeQuietly(this.audioEncoder);
+    this.audioEncoder = null;
+  }
+
+  // ---- plumbing -------------------------------------------------------
 
   send(bytes) {
     const socket = this.socket;
@@ -376,9 +478,8 @@ class MirrorSender {
   }
 
   reportStats() {
-    const seconds = 1;
     const fps = this.framesSent;
-    const mbps = (this.bytesSent * 8) / 1e6 / seconds;
+    const mbps = (this.bytesSent * 8) / 1e6;
     this.framesSent = 0;
     this.bytesSent = 0;
     ui.statFps.textContent = fps + ' fps';
@@ -391,27 +492,34 @@ class MirrorSender {
   stop(reason) {
     if (!this.running && !this.socket) return;
     this.running = false;
+    this.generation++;
 
     clearInterval(this.pingTimer);
     clearInterval(this.statsTimer);
-    if (this.abort) {
-      try { this.abort(); } catch (error) { /* the track is already gone */ }
-      this.abort = null;
+    if (this.stopDrawing) {
+      try { this.stopDrawing(); } catch (error) { /* already stopped */ }
+      this.stopDrawing = null;
     }
 
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       try {
-        this.socket.send(buildPacket(TYPE_BYE, 0, 0, new Uint8Array(0)));
+        this.socket.send(buildPacket(TYPE.BYE, 0, 0, new Uint8Array(0)));
       } catch (error) { /* closing anyway */ }
     }
     closeQuietly(this.videoEncoder);
-    closeQuietly(this.audioEncoder);
     this.videoEncoder = null;
-    this.audioEncoder = null;
-
-    if (this.stream) {
-      this.stream.getTracks().forEach((track) => track.stop());
-      this.stream = null;
+    this.stopAudio();
+    if (this.audioContext) {
+      this.audioContext.close().catch(() => {});
+      this.audioContext = null;
+    }
+    if (this.wrapperVideo) {
+      this.wrapperVideo.srcObject = null;
+      this.wrapperVideo = null;
+    }
+    if (this.source) {
+      try { this.source.stop(); } catch (error) { /* already released */ }
+      this.source = null;
     }
     if (this.socket) {
       this.socket.onclose = null;
@@ -435,7 +543,7 @@ function closeQuietly(encoder) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Scales to the TV's ceiling, keeping aspect and even dimensions (H.264 requires both). */
+/** Scales to the ceiling, keeping aspect and even dimensions (H.264 requires both). */
 function scaleToFit(width, height, maxHeight) {
   const limit = maxHeight > 0 ? maxHeight : 1080;
   if (height <= limit) {
@@ -467,35 +575,126 @@ function bitrateFor(height) {
 }
 
 /** A name the TV can show, without fingerprinting anything the user did not volunteer. */
-function describeThisDevice() {
+function describeThisDevice(source) {
   const agent = navigator.userAgent;
   let platform = 'Computer';
-  if (/Windows/i.test(agent)) platform = 'Windows PC';
+  if (/iPhone/i.test(agent)) platform = 'iPhone';
+  else if (/iPad/i.test(agent) || BPlaySources.isApplePortable()) platform = 'iPad';
+  else if (/Windows/i.test(agent)) platform = 'Windows PC';
   else if (/Macintosh|Mac OS X/i.test(agent)) platform = 'Mac';
   else if (/CrOS/i.test(agent)) platform = 'Chromebook';
   else if (/Android/i.test(agent)) platform = 'Android device';
-  else if (/iPhone|iPad/i.test(agent)) platform = 'iOS device';
   else if (/Linux/i.test(agent)) platform = 'Linux PC';
 
-  let browser = '';
-  if (/Edg\//.test(agent)) browser = 'Edge';
-  else if (/OPR\//.test(agent)) browser = 'Opera';
-  else if (/Firefox\//.test(agent)) browser = 'Firefox';
-  else if (/Chrome\//.test(agent)) browser = 'Chrome';
-  else if (/Safari\//.test(agent)) browser = 'Safari';
+  const suffix = {
+    camera: ' (Camera)',
+    image: ' (Photo)',
+    'video-file': ' (Video)',
+  }[source.kind] || '';
+  return platform + suffix;
+}
 
-  return browser ? platform + ' (' + browser + ')' : platform;
+function sourceHeadline(source, tvName) {
+  const what = {
+    screen: 'Mirroring to ',
+    camera: 'Camera on ',
+    image: 'Photo on ',
+    'video-file': 'Video on ',
+  }[source.kind] || 'Sending to ';
+  return what + (tvName || 'your Fire TV');
 }
 
 // ---------------------------------------------------------------------------
-// UI wiring
+// UI
 // ---------------------------------------------------------------------------
 
 let session = null;
+let selectedKind = 'screen';
+let facingMode = 'environment';
+let fileList = [];
+let fileIndex = 0;
 
 function showSetupError(message) {
   ui.setupError.textContent = message;
   ui.setupError.hidden = !message;
+}
+
+function selectSource(kind) {
+  selectedKind = kind;
+  const buttons = {
+    screen: ui.sourceScreen,
+    camera: ui.sourceCamera,
+    files: ui.sourceFiles,
+  };
+  Object.keys(buttons).forEach((key) => {
+    const button = buttons[key];
+    const active = key === kind;
+    button.classList.toggle('selected', active);
+    button.setAttribute('aria-checked', active ? 'true' : 'false');
+  });
+  ui.fileField.hidden = kind !== 'files';
+  ui.start.textContent = kind === 'screen' ? 'Start mirroring' : 'Start';
+
+  const hints = {
+    screen: 'Everything on this screen goes to the TV.',
+    camera: 'Point this device at whatever you want on the TV.',
+    files: 'Pick one or more photos, or a video, from this device.',
+  };
+  ui.sourceHint.textContent = hints[kind] || '';
+}
+
+async function acquireSelectedSource() {
+  const wantAudio = ui.wantAudio.checked;
+  if (selectedKind === 'screen') {
+    return BPlaySources.acquireScreen(wantAudio);
+  }
+  if (selectedKind === 'camera') {
+    return BPlaySources.acquireCamera(facingMode, wantAudio);
+  }
+  fileList = Array.from(ui.files.files || []);
+  if (!fileList.length) {
+    throw new Error('Choose a photo or video first.');
+  }
+  fileIndex = 0;
+  return BPlaySources.openFile(fileList[fileIndex], wantAudio);
+}
+
+async function advanceFile(delta, fromPlaybackEnd) {
+  if (!session || !fileList.length) return;
+  const next = fileIndex + delta;
+  if (next < 0 || next >= fileList.length) {
+    if (fromPlaybackEnd) session.stop(null);
+    return;
+  }
+  fileIndex = next;
+  updateFilePosition();
+  try {
+    const source = await BPlaySources.openFile(fileList[fileIndex], ui.wantAudio.checked);
+    await session.replaceSource(source);
+  } catch (error) {
+    session.stop(error.message);
+  }
+}
+
+function updateFilePosition() {
+  if (!fileList.length) {
+    ui.filePosition.textContent = '';
+    return;
+  }
+  ui.filePosition.textContent = (fileIndex + 1) + ' of ' + fileList.length;
+  ui.prev.disabled = fileIndex === 0;
+  ui.next.disabled = fileIndex === fileList.length - 1;
+}
+
+async function flipCamera() {
+  if (!session || selectedKind !== 'camera') return;
+  facingMode = facingMode === 'environment' ? 'user' : 'environment';
+  try {
+    const source = await BPlaySources.acquireCamera(facingMode, ui.wantAudio.checked);
+    await session.replaceSource(source);
+  } catch (error) {
+    showSetupError(error.message);
+  }
 }
 
 function onSessionEnded(reason) {
@@ -503,61 +702,113 @@ function onSessionEnded(reason) {
   ui.panelLive.hidden = true;
   ui.panelSetup.hidden = false;
   ui.start.disabled = false;
-  ui.start.textContent = 'Start mirroring';
+  selectSource(selectedKind);
   showSetupError(reason && reason !== 'You stopped sharing' ? reason : '');
 }
 
-async function beginMirroring() {
+async function begin() {
   showSetupError('');
   ui.start.disabled = true;
-  ui.start.textContent = 'Asking for a screen…';
+
+  let source;
+  try {
+    // Acquired before connecting so the permission prompt still counts as a user gesture,
+    // which iOS requires for both the camera and starting video playback.
+    source = await acquireSelectedSource();
+  } catch (error) {
+    ui.start.disabled = false;
+    const aborted = error && (error.name === 'NotAllowedError' || error.name === 'AbortError');
+    showSetupError(aborted ? '' : (error.message || String(error)));
+    return;
+  }
+
+  if (source.track) {
+    source.track.addEventListener('ended', () => {
+      if (session) session.stop('You stopped sharing');
+    });
+  }
 
   session = new MirrorSender();
   try {
     await session.start({
+      source,
       pin: ui.pin.value.trim(),
       maxHeight: parseInt(ui.quality.value, 10),
-      wantAudio: ui.wantAudio.checked,
     });
     ui.panelSetup.hidden = true;
     ui.panelLive.hidden = false;
-    ui.liveTitle.textContent = 'Mirroring to ' + (session.tvName || 'your Fire TV');
+    ui.liveTitle.textContent = sourceHeadline(source, session.tvName);
     if (session.tvName) ui.tvName.textContent = session.tvName;
+
+    ui.fileControls.hidden = selectedKind !== 'files';
+    ui.flip.hidden = selectedKind !== 'camera';
+    updateFilePosition();
   } catch (error) {
-    const aborted = error && (error.name === 'NotAllowedError' || error.name === 'AbortError');
     if (session) session.stop(null);
     session = null;
+    try { source.stop(); } catch (stopError) { /* already released */ }
     ui.start.disabled = false;
-    ui.start.textContent = 'Start mirroring';
-    showSetupError(aborted ? '' : (error.message || String(error)));
+    showSetupError(error.message || String(error));
   }
 }
 
 function init() {
-  const problem = missingCapability();
-  if (problem) {
-    ui.unsupportedReason.textContent = problem;
+  if (!window.isSecureContext) {
+    ui.unsupportedReason.textContent = 'This page was not loaded over HTTPS, so the browser '
+      + 'blocks camera and screen access. Open the https:// address shown on the TV.';
+    ui.panelUnsupported.hidden = false;
+    ui.panelSetup.hidden = true;
+    return;
+  }
+  if (typeof window.VideoEncoder === 'undefined') {
+    ui.unsupportedReason.textContent = 'This browser has no WebCodecs video encoder. '
+      + 'Chrome 94+, Edge 94+, Safari 16.4+ and Firefox 133+ all have one.';
     ui.panelUnsupported.hidden = false;
     ui.panelSetup.hidden = true;
     return;
   }
 
+  // Screen capture does not exist on iOS in any browser, so do not offer it there.
+  const screenAvailable = BPlaySources.canShareScreen();
+  if (!screenAvailable) {
+    ui.sourceScreen.disabled = true;
+    ui.sourceScreen.classList.add('unavailable');
+    ui.sourceScreen.querySelector('.source-note').textContent = 'Not possible on iPhone or iPad';
+  }
+  if (!BPlaySources.canUseCamera()) {
+    ui.sourceCamera.disabled = true;
+    ui.sourceCamera.classList.add('unavailable');
+  }
+  selectSource(screenAvailable ? 'screen' : 'camera');
+
   // The TV's QR code carries the PIN, so a scanned link needs no typing at all.
   const pinFromUrl = new URLSearchParams(location.search).get('pin');
   if (pinFromUrl) ui.pin.value = pinFromUrl.replace(/\D/g, '').slice(0, 4);
 
-  const canSendAudio = typeof window.AudioEncoder !== 'undefined'
-    && 'MediaStreamTrackProcessor' in window;
-  if (!canSendAudio) {
+  const trackAudio = 'MediaStreamTrackProcessor' in window;
+  const webAudio = typeof (window.AudioContext || window.webkitAudioContext) === 'function';
+  if (typeof window.AudioEncoder === 'undefined' || (!trackAudio && !webAudio)) {
     ui.wantAudio.checked = false;
     ui.wantAudio.disabled = true;
-    ui.audioNote.textContent = '— this browser can\'t capture audio';
+    ui.audioNote.textContent = '— this browser can\'t send audio';
   } else {
-    ui.audioNote.textContent = '— if the share dialog offers it';
+    ui.audioNote.textContent = '— when the source has any';
   }
 
-  ui.start.addEventListener('click', beginMirroring);
+  ui.sourceScreen.addEventListener('click', () => selectSource('screen'));
+  ui.sourceCamera.addEventListener('click', () => selectSource('camera'));
+  ui.sourceFiles.addEventListener('click', () => selectSource('files'));
+  ui.files.addEventListener('change', () => {
+    fileList = Array.from(ui.files.files || []);
+    fileIndex = 0;
+    selectSource('files');
+  });
+
+  ui.start.addEventListener('click', begin);
   ui.stop.addEventListener('click', () => session && session.stop('Stopped'));
+  ui.prev.addEventListener('click', () => advanceFile(-1, false));
+  ui.next.addEventListener('click', () => advanceFile(1, false));
+  ui.flip.addEventListener('click', flipCamera);
   window.addEventListener('pagehide', () => session && session.stop(null));
 
   fetch('/info').then((response) => response.json()).then((info) => {

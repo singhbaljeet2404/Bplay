@@ -51,9 +51,9 @@ updates are one click.
 
 | Your device | What to do | Install anything? |
 | --- | --- | --- |
-| **Windows / macOS / Linux / Chromebook** | Open the `https://` address shown on the TV in Chrome, Edge, Firefox or Safari. Pick a screen, press Start. | **No** |
+| **Windows / macOS / Linux / Chromebook** | Open the `https://` address shown on the TV in Chrome, Edge, Firefox or Safari. Pick a screen, a camera, or photos and video. Press Start. | **No** |
 | **Android phone or tablet** | Install [`bplay-sender.apk`](https://github.com/singhbaljeet2404/Bplay/releases/latest/download/bplay-sender.apk), or just use Chrome and the same address. | Optional |
-| **iPhone / iPad** | Build the sender app from [`ios-sender/`](ios-sender/README.md). | Yes — see below |
+| **iPhone / iPad** | Open the same address for **camera, photos and video**. For full screen mirroring, build the sender app from [`ios-sender/`](ios-sender/README.md). | No / Yes |
 
 Scanning the QR code on the TV opens the right address **with the PIN already filled in**.
 
@@ -90,18 +90,31 @@ annoying. It matters most on networks that block mDNS — guest and hotel Wi-Fi 
 
 Video always travels over Wi-Fi.
 
-### iPhone and iPad need a build step
+### AirPlay is not something this project can provide
 
-Safari has no screen-capture API. Neither does Chrome or Firefox on iOS, because Apple requires
-them to use Safari's engine. This is an iOS restriction and no app can route around it.
+AirPlay mirroring encrypts its video with keys from Apple's **FairPlay** handshake. A receiver
+needs either an Apple **MFi licence** or reverse-engineered FairPlay code lifted from Apple's
+binaries. Every open-source AirPlay receiver takes the second route; BPlay will not, because that
+is circumvention code and publishing it here would put the exposure on this repository's owner.
+That is why no free, legitimate AirPlay receiver exists for the Fire TV Stick.
 
-Apple's only sanctioned route for full-device mirroring is a **Broadcast Upload Extension**, which
-must ship inside an app. Putting that on the App Store costs $99/year, which would make this
-project not free. So the complete iOS source is in [`ios-sender/`](ios-sender/README.md) and you
-build it yourself — about ten minutes in Xcode with a free Apple ID, at no cost.
+If native AirPlay is what you want, a **licensed receiver app installed on the Fire TV** (AirScreen,
+AirReceiver) gives it to you — your iPhone keeps using its own AirPlay button with nothing
+installed on it. Amazon's own Fire TV **Omni and 4-Series televisions** have AirPlay 2 built in;
+the Stick, Stick 4K Max and Cube never have. Full detail in [docs/AIRPLAY.md](docs/AIRPLAY.md).
 
-The alternative that needs no build at all: **AirPlay to an Apple TV**, or use any other device
-from the table above.
+### What iPhone and iPad *can* do with nothing installed
+
+Safari has no screen-capture API, and Apple requires every iOS browser to use Safari's engine, so
+no browser can mirror a screen. Camera and files are a different matter. Open the TV's address in
+Safari, or scan the QR code, and you get:
+
+- **Camera** — live, either lens
+- **Photos** — pick several, step through them with Previous/Next
+- **Video** — plays on the TV with sound, controlled from your phone
+
+For full screen mirroring, the complete iOS source is in [`ios-sender/`](ios-sender/README.md) —
+about ten minutes in Xcode with a free Apple ID, at no cost.
 
 ---
 
@@ -137,7 +150,8 @@ cd Bplay
 You need JDK 17 and an Android SDK with API 34. The APKs land in
 `*/build/outputs/apk/release/`. `./gradlew :protocol:test` runs the unit tests, and
 `node tools/wire-check.js` verifies the browser sender still encodes bytes the receiver
-understands.
+understands, and `node tools/page-test.js` loads the sender page in a real browser — including a
+simulated iPhone — to check it works and never dead-ends.
 
 Signing is [deliberately public](docs/SIGNING.md) — see that page for why a release key is
 committed here on purpose.
@@ -166,7 +180,8 @@ only then publishes.
 ## What it does and doesn't do
 
 **Works:** whole-screen mirroring with audio from Windows/macOS/Linux (Chrome, Edge, Firefox,
-Safari), Android 5.0+, iOS 14+; 480p/720p/1080p at 30 fps; PIN pairing; one device at a time;
+Safari), Android 5.0+, iOS 14+ (via the built app); camera, photos and video from any device
+including iPhone and iPad with nothing installed; 480p/720p/1080p at 30 fps; PIN pairing; one device at a time;
 Fire TV Stick 2nd gen and newer, Fire TV Cube, Fire TV built into a television.
 
 **Doesn't work, and won't:**
@@ -174,6 +189,7 @@ Fire TV Stick 2nd gen and newer, Fire TV Cube, Fire TV built into a television.
 - **Netflix, Disney+, Prime Video and other DRM-protected apps show a black screen.** The
   operating system enforces that on both Android and iOS. No mirroring app can defeat it, and one
   that claims to is lying to you.
+- **AirPlay from an iPhone with nothing installed** — see above; it needs Apple's licensing.
 - **Bluetooth-only mirroring** — see above.
 - **Mirroring across different networks or over the internet.** Same Wi-Fi, by design.
 - **Audio from iOS**, for now — iOS mirroring is video-only.
