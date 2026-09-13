@@ -135,7 +135,8 @@ Latency on a decent home network lands around 100–200 ms — fine for slides, 
 video, and usable for anything but twitch gaming.
 
 More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
-[docs/PROTOCOL.md](docs/PROTOCOL.md) · [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+[docs/PROTOCOL.md](docs/PROTOCOL.md) · [docs/TESTING.md](docs/TESTING.md) ·
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) · [docs/AIRPLAY.md](docs/AIRPLAY.md)
 
 ---
 
