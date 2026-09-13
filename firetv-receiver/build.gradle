@@ -49,7 +49,11 @@ android {
     }
 
     lint {
-        abortOnError false
+        // Blocking on purpose: the NewApi checks are what stand between this and a crash on
+        // Fire OS 5, which is Android 5.1 and cannot be tested by compiling against API 34.
+        abortOnError true
+        warningsAsErrors false
+        checkReleaseBuilds true
     }
 }
 

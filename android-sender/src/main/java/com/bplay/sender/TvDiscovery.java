@@ -18,9 +18,12 @@ import android.os.Looper;
 import android.os.ParcelUuid;
 import android.util.Log;
 
+import androidx.core.content.ContextCompat;
+
 import com.bplay.protocol.BplayProtocol;
 
 import java.util.ArrayDeque;
+import java.util.Iterator;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -121,8 +124,17 @@ public final class TvDiscovery {
                     // Only the service name is populated here, so match on it.
                     main.post(() -> {
                         String name = info.getServiceName();
-                        boolean removed = found.values()
-                                .removeIf(tv -> tv.name.equals(name) && "Wi-Fi".equals(tv.via));
+                        // An explicit iterator rather than removeIf: that arrived in API 24 and
+                        // this app runs back to 22, where it would be a NoSuchMethodError.
+                        boolean removed = false;
+                        Iterator<Tv> iterator = found.values().iterator();
+                        while (iterator.hasNext()) {
+                            Tv tv = iterator.next();
+                            if (tv.name.equals(name) && "Wi-Fi".equals(tv.via)) {
+                                iterator.remove();
+                                removed = true;
+                            }
+                        }
                         if (removed) {
                             listener.onDevicesChanged(devices());
                         }
@@ -224,13 +236,14 @@ public final class TvDiscovery {
             ParcelUuid.fromString("0000b91a-0000-1000-8000-00805f9b34fb");
 
     public static boolean hasScanPermission(Context context) {
+        // ContextCompat rather than Context#checkSelfPermission, which is API 23.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            return context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
+            return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN)
                     == PackageManager.PERMISSION_GRANTED;
         }
         // Before Android 12 a BLE scan was legally a location operation.
-        return context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-                == PackageManager.PERMISSION_GRANTED;
+        return ContextCompat.checkSelfPermission(context,
+                Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
     public static String[] scanPermissions() {
@@ -241,6 +254,9 @@ public final class TvDiscovery {
     }
 
     /** @return false when Bluetooth is off, unsupported, or not permitted */
+    // Lint cannot see through hasScanPermission(), which gates every path below; the
+    // SecurityException catch is the second line of defence.
+    @android.annotation.SuppressLint("MissingPermission")
     public boolean startBluetoothDiscovery() {
         stopBluetoothDiscovery();
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP
@@ -308,9 +324,11 @@ public final class TvDiscovery {
         return new Tv("Fire TV (via Bluetooth)", host, port, pinValue != 0xFFFF, "Bluetooth");
     }
 
+    // Same as above: the hasScanPermission() gate is there, lint just cannot follow it.
+    @android.annotation.SuppressLint("MissingPermission")
     public void stopBluetoothDiscovery() {
         try {
-            if (scanner != null && scanCallback != null) {
+            if (scanner != null && scanCallback != null && hasScanPermission(context)) {
                 scanner.stopScan(scanCallback);
             }
         } catch (Exception ignored) {

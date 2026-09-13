@@ -18,6 +18,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import com.bplay.protocol.BplayProtocol;
 
@@ -83,7 +85,7 @@ public final class MainActivity extends AppCompatActivity
                 getResources().getStringArray(R.array.quality_labels)));
         quality.setSelection(1); // 1080p
 
-        if (!AudioCapture.isSupported()) {
+        if (!ScreenCaptureService.audioCaptureSupported()) {
             audio.setChecked(false);
             audio.setEnabled(false);
             audio.setText(R.string.audio_unsupported);
@@ -131,7 +133,9 @@ public final class MainActivity extends AppCompatActivity
     }
 
     private void enableBluetoothDiscovery() {
-        requestPermissions(TvDiscovery.scanPermissions(), REQUEST_BLUETOOTH);
+        // ActivityCompat rather than Activity#requestPermissions, which is API 23. On anything
+        // older the permissions were granted at install time and this is a no-op.
+        ActivityCompat.requestPermissions(this, TvDiscovery.scanPermissions(), REQUEST_BLUETOOTH);
     }
 
     @Override
@@ -267,9 +271,11 @@ public final class MainActivity extends AppCompatActivity
 
     private void requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                && ContextCompat.checkSelfPermission(this,
+                android.Manifest.permission.POST_NOTIFICATIONS)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+            ActivityCompat.requestPermissions(this,
+                    new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
                     REQUEST_NOTIFICATIONS);
         }
     }

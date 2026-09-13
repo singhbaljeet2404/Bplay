@@ -71,7 +71,7 @@ public final class ScreenCaptureService extends Service implements ScreenEncoder
     private final Handler main = new Handler(Looper.getMainLooper());
     private MediaProjection projection;
     private ScreenEncoder encoder;
-    private AudioCapture audioCapture;
+    private AudioSource audioCapture;
     private SenderConnection connection;
 
     @Override
@@ -100,7 +100,7 @@ public final class ScreenCaptureService extends Service implements ScreenEncoder
         boolean wantAudio = intent.getBooleanExtra(EXTRA_AUDIO, true);
         String deviceName = intent.getStringExtra(EXTRA_DEVICE_NAME);
 
-        boolean audioPossible = wantAudio && AudioCapture.isSupported();
+        boolean audioPossible = wantAudio && audioCaptureSupported();
 
         try {
             connection = new SenderConnection();
@@ -130,11 +130,9 @@ public final class ScreenCaptureService extends Service implements ScreenEncoder
             encoder = new ScreenEncoder(connection, this);
             encoder.start(projection, size[0], size[1], dpi, bitrate);
 
-            if (audioPossible && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                audioCapture = new AudioCapture(connection);
-                if (!audioCapture.start(projection)) {
-                    audioCapture = null;
-                }
+            if (audioPossible) {
+                AudioCapture capture = new AudioCapture(connection);
+                audioCapture = capture.start(projection) ? capture : null;
             }
 
             running = true;
@@ -157,6 +155,14 @@ public final class ScreenCaptureService extends Service implements ScreenEncoder
             Log.e(TAG, "Could not start mirroring", e);
             shutdown(e.getMessage() == null ? "Could not start mirroring" : e.getMessage());
         }
+    }
+
+    /**
+     * Whether this phone can capture its own audio output. AudioPlaybackCapture arrived in
+     * Android 10; before that no app could legally record another app's sound.
+     */
+    public static boolean audioCaptureSupported() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
     }
 
     /** Scales to the TV's ceiling, preserving aspect and keeping both sides even for H.264. */

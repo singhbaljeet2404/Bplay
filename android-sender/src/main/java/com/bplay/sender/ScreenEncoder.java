@@ -69,7 +69,7 @@ public final class ScreenEncoder {
             format.setInteger(MediaFormat.KEY_BITRATE_MODE,
                     MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // A screen is mostly static, so let the encoder idle rather than burn bitrate and
             // battery re-sending an unchanged desktop 30 times a second.
             format.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, FRAME_RATE);

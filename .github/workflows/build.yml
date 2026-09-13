@@ -51,6 +51,11 @@ jobs:
       - name: Unit tests
         run: ./gradlew :protocol:test --stacktrace
 
+      # Lint is what catches calls to APIs newer than minSdk 22. Those compile cleanly against
+      # API 34 and then crash on a Fire TV Stick, so this has to be blocking rather than a report.
+      - name: Lint (API levels, permissions, manifest)
+        run: ./gradlew :firetv-receiver:lintRelease :android-sender:lintRelease --stacktrace
+
       - name: Build APKs
         run: ./gradlew assembleRelease --stacktrace
 

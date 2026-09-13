@@ -11,6 +11,8 @@ import android.os.Build;
 import android.os.ParcelUuid;
 import android.util.Log;
 
+import androidx.core.content.ContextCompat;
+
 /**
  * Broadcasts the TV's address and PIN over Bluetooth LE so the phone app can connect without the
  * user reading anything off the screen.
@@ -43,6 +45,9 @@ public final class BleBeacon {
      * @param ipv4 the address to publish, e.g. {@code 192.168.1.42}
      * @param pin  the four-digit PIN, or "" when PINs are disabled
      */
+    // Lint cannot see through hasAdvertisePermission(), which is checked below before the
+    // advertiser is touched; the SecurityException catch is the second line of defence.
+    @android.annotation.SuppressLint("MissingPermission")
     public void start(String ipv4, String pin) {
         stop();
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
@@ -63,6 +68,10 @@ public final class BleBeacon {
             advertiser = adapter.getBluetoothLeAdvertiser();
             if (advertiser == null) {
                 Log.i(TAG, "This device cannot advertise over BLE; Wi-Fi discovery only");
+                return;
+            }
+            if (!hasAdvertisePermission()) {
+                Log.i(TAG, "No Bluetooth advertise permission; Wi-Fi discovery only");
                 return;
             }
 
@@ -97,9 +106,21 @@ public final class BleBeacon {
         }
     }
 
+    /** BLUETOOTH_ADVERTISE became a runtime permission in Android 12. */
+    private boolean hasAdvertisePermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return true;
+        }
+        return ContextCompat.checkSelfPermission(context,
+                android.Manifest.permission.BLUETOOTH_ADVERTISE)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    // Same as above: the hasAdvertisePermission() gate is there, lint just cannot follow it.
+    @android.annotation.SuppressLint("MissingPermission")
     public void stop() {
         try {
-            if (advertiser != null && callback != null) {
+            if (advertiser != null && callback != null && hasAdvertisePermission()) {
                 advertiser.stopAdvertising(callback);
             }
         } catch (Exception ignored) {

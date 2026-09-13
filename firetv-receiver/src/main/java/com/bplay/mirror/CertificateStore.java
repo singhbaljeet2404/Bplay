@@ -3,6 +3,7 @@ package com.bplay.mirror;
 import android.content.Context;
 import android.util.Log;
 
+import com.bplay.protocol.tls.TlsServer;
 import com.bplay.protocol.tls.X509SelfSigner;
 
 import java.io.File;
@@ -17,7 +18,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLServerSocketFactory;
 
@@ -92,10 +92,8 @@ public final class CertificateStore {
                 addresses,
                 VALIDITY_DAYS);
 
-        KeyStore ks = KeyStore.getInstance("PKCS12");
-        ks.load(null, KEYSTORE_PASSWORD);
-        ks.setKeyEntry(ALIAS, result.keyPair.getPrivate(), KEYSTORE_PASSWORD,
-                new Certificate[]{result.certificate});
+        KeyStore ks = TlsServer.newKeyStore(ALIAS, result.keyPair.getPrivate(),
+                result.certificate, KEYSTORE_PASSWORD);
 
         File temp = new File(file.getParentFile(), file.getName() + ".tmp");
         try (FileOutputStream out = new FileOutputStream(temp)) {
@@ -118,12 +116,7 @@ public final class CertificateStore {
         if (keyStore == null) {
             throw new IllegalStateException("prepare() was not called");
         }
-        KeyManagerFactory kmf =
-                KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-        kmf.init(keyStore, KEYSTORE_PASSWORD);
-        SSLContext ssl = SSLContext.getInstance("TLS");
-        ssl.init(kmf.getKeyManagers(), null, null);
-        return ssl.getServerSocketFactory();
+        return TlsServer.serverSocketFactory(keyStore, KEYSTORE_PASSWORD);
     }
 
     /**

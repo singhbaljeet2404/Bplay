@@ -28,17 +28,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Android intends.
  */
 @RequiresApi(Build.VERSION_CODES.Q)
-public final class AudioCapture {
+public final class AudioCapture implements AudioSource {
 
     private static final String TAG = "BPlayAudioCapture";
     private static final String MIME = MediaFormat.MIMETYPE_AUDIO_AAC;
     private static final int SAMPLE_RATE = 44100;
     private static final int CHANNELS = 2;
     private static final int BIT_RATE = 128_000;
-
-    public static boolean isSupported() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
-    }
 
     private final SenderConnection connection;
     private final AtomicBoolean running = new AtomicBoolean();
@@ -50,7 +46,7 @@ public final class AudioCapture {
         this.connection = connection;
     }
 
-    /** @return true if capture actually started; false means carry on without sound */
+    @Override
     @SuppressLint("MissingPermission")
     public boolean start(MediaProjection projection) {
         if (!running.compareAndSet(false, true)) {
@@ -156,6 +152,7 @@ public final class AudioCapture {
         }
     }
 
+    @Override
     public void stop() {
         running.set(false);
         if (thread != null) {
